@@ -978,6 +978,12 @@
       return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
     };
     const dtstamp = formatICalDate(new Date().toISOString());
+    const escape = (val: string) =>
+      (val || '')
+        .replace(/\\/g, '\\\\')
+        .replace(/;/g, '\\;')
+        .replace(/,/g, '\\,')
+        .replace(/\n/g, '\\n');
     // When a timezone is set, emit the wall-clock as DTSTART;TZID=<tz>:...
     // (no Z). This preserves the creator's intent — "3pm in NY" stays at
     // "3pm in NY" across DST and on devices in other zones. Falling back
@@ -988,12 +994,6 @@
     const dtstart = useTzid ? formatICalLocal(start, timezone as string) : formatICalDate(start);
     const dtend = useTzid ? formatICalLocal(end, timezone as string) : formatICalDate(end);
     const eventUid = uid || `${Date.now()}@forwardemail.net`;
-    const escape = (val: string) =>
-      (val || '')
-        .replace(/\\/g, '\\\\')
-        .replace(/;/g, '\\;')
-        .replace(/,/g, '\\,')
-        .replace(/\n/g, '\\n');
     const lines = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
