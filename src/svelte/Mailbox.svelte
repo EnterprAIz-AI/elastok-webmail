@@ -5513,15 +5513,21 @@
           class:fe-layout-productivity={isProductivityLayout}
           class:fe-vertical-resizable={isVerticalDesktop}
           style={shellStyle}
+          data-testid="mailbox-shell"
         >
           <aside
             class="fe-folders"
             class:fe-folders-open={$sidebarOpen}
             bind:this={sidebarRef}
             style={$sidebarOpen ? `width:${sidebarWidth}px;min-width:${sidebarWidth}px` : ''}
+            data-testid="mailbox-sidebar"
           >
             <div>
-              <Button class="w-full gap-2" onclick={() => mailboxView?.composeModal?.open?.()}>
+              <Button
+                class="w-full gap-2"
+                data-testid="compose-button"
+                onclick={() => mailboxView?.composeModal?.open?.()}
+              >
                 <Pencil class="h-4 w-4" />
                 <span>Compose</span>
               </Button>
@@ -5603,12 +5609,14 @@
             </div>
 
             <div class="flex-1 overflow-y-auto">
-              <ul class="space-y-0.5 p-2">
+              <ul class="space-y-0.5 p-2" data-testid="folder-list">
                 {#each visibleFolders as folder}
                   <li
                     class={`relative transition-colors ${!outboxSelected && $selectedFolder === folder.path ? 'bg-accent ring-1 ring-border' : ''}`}
                     class:has-children={hasChildren(folder)}
                     class:fe-drag-over={dragOverFolder === folder.path}
+                    data-testid="folder-item"
+                    data-folder-path={folder.path}
                     oncontextmenu={(e) => handleFolderContextMenu(e, folder)}
                     ondragenter={(e) => handleFolderDragEnter(e, folder)}
                     ondragover={(e) => handleFolderDragOver(e, folder)}
@@ -5804,6 +5812,7 @@
             class="fe-messages"
             class:mobile-reader-active={$mobileReader}
             bind:this={messagesPaneEl}
+            data-testid="message-list-pane"
           >
             {#if $filteredConversations.length || $filteredMessages.length || $unreadOnly || $hasAttachmentsOnly || $starredOnly || ($filterByLabel && $filterByLabel.length)}
               <div
@@ -7351,6 +7360,7 @@
               bind:this={readerPaneEl}
               ontouchstart={handleReaderSwipeStart}
               ontouchend={handleReaderSwipeEnd}
+              data-testid="reader-pane"
             >
               {#if outboxSelected && selectedOutboxItem}
                 <!-- Outbox Item Reader -->
@@ -8739,6 +8749,7 @@
               role="dialog"
               aria-modal="true"
               aria-labelledby="confirm-title"
+              data-testid="confirm-dialog"
             >
               <div class="text-lg font-semibold mb-4">
                 <h3 id="confirm-title">{confirmDialogTitle}</h3>
@@ -8750,6 +8761,7 @@
                 <button
                   class="inline-flex items-center justify-center px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
                   type="button"
+                  data-testid="confirm-dialog-cancel"
                   onclick={hideConfirmDialog}
                 >
                   Cancel
@@ -8759,6 +8771,7 @@
                     ? 'inline-flex items-center justify-center px-4 py-2 text-sm font-medium bg-destructive text-destructive-foreground hover:bg-destructive/90'
                     : 'inline-flex items-center justify-center px-4 py-2 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90'}
                   type="button"
+                  data-testid="confirm-dialog-confirm"
                   onclick={confirmAction}
                 >
                   Confirm

@@ -12,6 +12,7 @@ on:
       - '.github/workflows/e2e-webview.yml'
   push:
     branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -26,7 +27,13 @@ env:
 
 jobs:
   webview-e2e:
-    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
+    # Skip on release commits — release.yml invokes this workflow via
+    # workflow_call as a gate, so the standalone push-to-main run that np's
+    # "chore(release): X.Y.Z" commit would trigger is a duplicate. CI does the
+    # same in ci.yml.
+    if: |
+      (github.event.pull_request.draft == false || github.event_name != 'pull_request')
+      && !(github.event_name == 'push' && startsWith(github.event.head_commit.message, 'chore(release):'))
     strategy:
       fail-fast: false
       matrix:

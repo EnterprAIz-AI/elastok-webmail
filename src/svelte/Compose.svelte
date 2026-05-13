@@ -2707,6 +2707,7 @@
       class:md:mx-auto={!nativeWindow && expanded}
       role="dialog"
       aria-modal={!compact && !nativeWindow}
+      data-testid="compose-modal"
     >
       <header
         class="flex h-14 items-center justify-between gap-3 px-4 bg-muted/30"

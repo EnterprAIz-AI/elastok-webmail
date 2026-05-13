@@ -22,6 +22,46 @@ updates:
           - minor
           - patch
 
+  # E2E webview harness (Vitest + raw webdriverio, isolated lockfile)
+  - package-ecosystem: npm
+    directory: /e2e-webview
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 4
+    reviewers:
+      - forwardemail/core
+    labels:
+      - dependencies
+      - e2e
+    groups:
+      e2e-webview-deps:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+
+  # E2E mobile harness (Vitest + raw webdriverio, isolated lockfile)
+  - package-ecosystem: npm
+    directory: /e2e-mobile
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 4
+    reviewers:
+      - forwardemail/core
+    labels:
+      - dependencies
+      - e2e
+    groups:
+      e2e-mobile-deps:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+
   # GitHub Actions
   - package-ecosystem: github-actions
     directory: /

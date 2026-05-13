@@ -110,6 +110,9 @@
   class="grid cursor-pointer grid-cols-[28px_1fr_auto] gap-2 border-b border-border px-3 py-2.5 transition-colors hover:bg-accent/50 {unread
     ? 'bg-primary/5'
     : ''} {isSelected ? 'bg-primary/10' : ''}"
+  data-testid="message-row"
+  data-message-id={item.id}
+  data-unread={unread ? 'true' : 'false'}
   onclick={handleClick}
   oncontextmenu={handleContext}
   role="button"

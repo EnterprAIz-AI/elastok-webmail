@@ -13,9 +13,13 @@ on:
         required: true
         type: string
 
-# Minimal permissions — only contents:write for release management
+# Minimal permissions — contents:write for release management; id-token +
+# attestations:write so called workflows can publish SLSA build-provenance
+# attestations to the Sigstore transparency log via actions/attest-build-provenance.
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -119,9 +123,18 @@ jobs:
             echo "release_draft=true" >> "$GITHUB_OUTPUT"
           fi
 
+  # ── 1b. E2E WebView gate ───────────────────────────────────────────────
+  # Runs the cross-platform WebView e2e matrix against the release commit
+  # before any release artifacts are built. Failure aborts the release so we
+  # don't ship a broken frontend to desktop or mobile.
+  e2e-webview:
+    needs: create-release
+    uses: ./.github/workflows/e2e-webview.yml
+    secrets: inherit
+
   # ── 2. Build Desktop (Tauri) ────────────────────────────────────────────
   build-desktop:
-    needs: create-release
+    needs: [create-release, e2e-webview]
     uses: ./.github/workflows/release-desktop.yml
     with:
       version: ${{ needs.create-release.outputs.version }}
@@ -134,7 +147,7 @@ jobs:
   # and skips gracefully when signing secrets aren't configured, so this
   # never blocks the release when provisioning isn't ready.
   build-mobile:
-    needs: create-release
+    needs: [create-release, e2e-webview]
     uses: ./.github/workflows/release-mobile.yml
     with:
       version: ${{ needs.create-release.outputs.version }}

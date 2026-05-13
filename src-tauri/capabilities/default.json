@@ -43,9 +43,6 @@
     "core:menu:default",
     "dialog:allow-save",
     "dialog:allow-open",
-    "fs:allow-read-file",
-    "fs:allow-write-file",
-    "fs:allow-remove",
     "opener:allow-open-path"
   ],
   "platforms": ["linux", "macOS", "windows", "android", "iOS"]
