@@ -7,7 +7,7 @@ vi.mock('../../src/utils/storage', () => ({
   },
 }));
 
-import { sanitizeHtml, restoreBlockedImages } from '../../src/utils/sanitize.js';
+import { sanitizeHtml, restoreBlockedImages, htmlToPlainText } from '../../src/utils/sanitize.js';
 
 describe('sanitizeHtml', () => {
   it('returns empty result for falsy input', () => {
@@ -194,5 +194,63 @@ describe('restoreBlockedImages', () => {
     const restored = restoreBlockedImages(html);
     expect(restored).toContain('data:image/png;base64,abc');
     expect(restored).toContain('src="https://cdn.example.com/img.jpg"');
+  });
+});
+
+describe('htmlToPlainText', () => {
+  it('returns empty string for falsy input', () => {
+    expect(htmlToPlainText('')).toBe('');
+    expect(htmlToPlainText(null)).toBe('');
+    expect(htmlToPlainText(undefined)).toBe('');
+  });
+
+  it('extracts text and drops tags', () => {
+    const text = htmlToPlainText('<p>Hello <strong>world</strong></p>');
+    expect(text).toContain('Hello world');
+    expect(text).not.toContain('<');
+  });
+
+  it('removes scripts and styles entirely', () => {
+    const text = htmlToPlainText('<style>p{color:red}</style><script>alert(1)</script><p>Body</p>');
+    expect(text).toContain('Body');
+    expect(text).not.toContain('alert');
+    expect(text).not.toContain('color:red');
+  });
+
+  it('separates block elements with newlines', () => {
+    const text = htmlToPlainText('<p>One</p><p>Two</p><p>Three</p>');
+    const lines = text.split('\n').filter(Boolean);
+    expect(lines).toEqual(['One', 'Two', 'Three']);
+  });
+
+  it('preserves <br> as a single newline', () => {
+    const text = htmlToPlainText('Line one<br>Line two');
+    expect(text).toBe('Line one\nLine two');
+  });
+
+  it('appends href next to link text when not already shown', () => {
+    const text = htmlToPlainText('<a href="https://example.com">click here</a>');
+    expect(text).toContain('click here');
+    expect(text).toContain('<https://example.com>');
+  });
+
+  it('does not duplicate href when link text already contains the URL', () => {
+    const text = htmlToPlainText('<a href="https://example.com">https://example.com</a>');
+    expect(text.match(/https:\/\/example\.com/g)?.length).toBe(1);
+  });
+
+  it('replaces images with alt text', () => {
+    const text = htmlToPlainText('Before<img src="x" alt="cat photo">After');
+    expect(text).toContain('[cat photo]');
+  });
+
+  it('falls back to [image] when no alt is set', () => {
+    const text = htmlToPlainText('<img src="x">');
+    expect(text).toBe('[image]');
+  });
+
+  it('collapses excessive whitespace', () => {
+    const text = htmlToPlainText('<p>A</p>\n\n\n\n<p>B</p>');
+    expect(text).not.toMatch(/\n{3,}/);
   });
 });

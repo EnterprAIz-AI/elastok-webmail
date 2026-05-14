@@ -72,6 +72,7 @@
   <div
     class="hidden md:flex items-center h-9 bg-muted/30 border-b border-border px-1 gap-0.5 overflow-x-auto shrink-0"
     role="tablist"
+    data-testid="tab-bar"
   >
     {#each $tabs as tab (tab.id)}
       {@const Icon = getTabIcon(tab)}
@@ -79,6 +80,9 @@
         type="button"
         role="tab"
         aria-selected={tab.id === $activeTabId}
+        data-testid="tab"
+        data-tab-type={tab.type}
+        data-tab-id={tab.id}
         class="group relative inline-flex items-center gap-1.5 h-7 min-w-[120px] max-w-[220px] px-2.5 text-sm transition-colors shrink-0 border border-transparent
           {tab.id === $activeTabId
           ? 'bg-background text-foreground border-border border-b-background shadow-sm -mb-px z-10'

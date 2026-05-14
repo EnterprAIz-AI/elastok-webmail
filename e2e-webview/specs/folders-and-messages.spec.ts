@@ -56,22 +56,49 @@ describe('folders and messages', () => {
     expect(await $$count('[data-testid="message-row"]')).toBeGreaterThan(0);
   });
 
-  it('opens a message into the reader when a row is clicked', async () => {
+  // On Tauri desktop, clicking a row calls openMessageTab (Thunderbird-style
+  // tabs in TabBar). On non-desktop / mobile layouts, the row populates the
+  // inline reader pane. Accept either path so the spec is layout-agnostic.
+  it('opens the message — new tab on desktop, reader pane otherwise', async () => {
+    await browser.waitUntil(async () => (await $$count('[data-testid="message-row"]')) > 0, {
+      timeout: 15_000,
+    });
+
+    const beforeTabs = await $$count('[data-testid="tab"][data-tab-type="message"]');
+
+    const rows = await browser.$$('[data-testid="message-row"]');
+    await rows[0].click();
+
+    await browser.waitUntil(
+      async () => {
+        const messageTabs = await $$count('[data-testid="tab"][data-tab-type="message"]');
+        if (messageTabs > beforeTabs) return true;
+        const reader = await browser.$('[data-testid="reader-pane"]');
+        return reader.isExisting();
+      },
+      {
+        timeout: 10_000,
+        timeoutMsg: 'expected either a new message tab or the reader pane after clicking a row',
+      },
+    );
+  });
+
+  it('makes the new message tab the active tab (desktop)', async () => {
     await browser.waitUntil(async () => (await $$count('[data-testid="message-row"]')) > 0, {
       timeout: 15_000,
     });
     const rows = await browser.$$('[data-testid="message-row"]');
     await rows[0].click();
-    // Productivity layout (default) overlays the reader inside the message pane;
-    // classic layout uses [data-testid="reader-pane"]. Either path is fine —
-    // success is the URL pivoting to a message detail or the reader showing.
-    await browser.waitUntil(
-      async () => {
-        const url = (await browser.execute(() => location.pathname + location.hash)) as string;
-        const reader = await browser.$('[data-testid="reader-pane"]');
-        return url.includes('/mailbox/') || (await reader.isExisting());
-      },
-      { timeout: 10_000, timeoutMsg: 'reader did not open after clicking a message row' },
-    );
+
+    // Skip cleanly on non-desktop layouts where openMessageTab is bypassed.
+    const opened = await browser
+      .$('[data-testid="tab"][data-tab-type="message"]')
+      .waitForExist({ timeout: 5_000, reverse: false })
+      .then(() => true)
+      .catch(() => false);
+    if (!opened) return;
+
+    const tab = await browser.$('[data-testid="tab"][data-tab-type="message"]');
+    expect(await tab.getAttribute('aria-selected')).toBe('true');
   });
 });

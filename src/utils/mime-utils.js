@@ -166,10 +166,17 @@ const decodeBEncoded = (input, charset) => {
 export function decodeMimeHeader(value = '') {
   if (!value || typeof value !== 'string') return value || '';
   const encodedWord = /=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g;
-  return value.replace(encodedWord, (_match, charset, encoding, text) => {
-    if (encoding.toLowerCase() === 'q') {
-      return decodeQEncoded(text, charset);
-    }
-    return decodeBEncoded(text, charset);
+  return value.replace(encodedWord, (match, charset, encoding, text) => {
+    // Empty payload (`=?utf-8?B??=`) — would silently collapse the whole
+    // encoded-word to '' and erase the header. Surface the raw token so the
+    // caller at least sees *something* and we have telemetry, rather than
+    // having a header (e.g. From/Subject) silently disappear.
+    if (!text) return match;
+    const decoded =
+      encoding.toLowerCase() === 'q'
+        ? decodeQEncoded(text, charset)
+        : decodeBEncoded(text, charset);
+    if (decoded === '' || decoded == null) return match;
+    return decoded;
   });
 }

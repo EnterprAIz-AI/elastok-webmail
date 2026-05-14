@@ -198,6 +198,77 @@ function isSafeImageUrl(url) {
   return SAFE_IMAGE_PROTOCOLS.test(trimmed);
 }
 
+/**
+ * Convert sanitized HTML to a plain-text string for "view as plain text" mode.
+ *
+ * Uses DOMParser rather than regex stripping so structure is preserved:
+ * block elements become newlines, <br> becomes a single newline, and links
+ * are kept with their href appended (so they remain useful/copyable in text
+ * view). The result is intended to be wrapped in <pre> when rendered.
+ *
+ * @param {string} html - HTML to convert
+ * @returns {string} Plain-text representation
+ */
+export function htmlToPlainText(html) {
+  if (!html) return '';
+
+  if (typeof DOMParser === 'undefined') {
+    // Last-resort fallback for non-DOM environments
+    return String(html)
+      .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/?(p|div|li|h[1-6]|tr)[^>]*>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    // Drop noise that has no readable text equivalent
+    doc.querySelectorAll('script, style, head').forEach((el) => el.remove());
+
+    // <br> becomes a newline
+    doc.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+
+    // Block-level elements get a trailing newline so their contents don't
+    // merge into one line
+    doc
+      .querySelectorAll('p, div, li, h1, h2, h3, h4, h5, h6, tr, blockquote, pre, hr')
+      .forEach((el) => el.append('\n'));
+
+    // Show the href next to link text — these are otherwise lost in textContent
+    doc.querySelectorAll('a[href]').forEach((a) => {
+      const href = a.getAttribute('href') || '';
+      const text = (a.textContent || '').trim();
+      if (href && text && !text.includes(href)) {
+        a.append(` <${href}>`);
+      }
+    });
+
+    // Replace images with their alt text (or [image])
+    doc.querySelectorAll('img').forEach((img) => {
+      const alt = img.getAttribute('alt') || '';
+      img.replaceWith(alt ? `[${alt}]` : '[image]');
+    });
+
+    const raw = doc.body?.textContent || '';
+    return raw
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/ ?\n ?/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  } catch (error) {
+    console.error('htmlToPlainText failed:', error);
+    return '';
+  }
+}
+
 export function restoreBlockedImages(html, { includeTrackingPixels = false } = {}) {
   if (!html) return '';
 

@@ -262,6 +262,16 @@ export const SETTINGS_REGISTRY: Record<string, SettingDefinition> = {
     localParse: (raw) => parseBoolean(raw, true),
     localSerialize: (value) => serializeBoolean(Boolean(value)),
   },
+  view_plain_text: {
+    id: 'view_plain_text',
+    label: 'View Emails As Plain Text',
+    scope: SETTING_SCOPES.DEVICE,
+    localKey: 'view_plain_text',
+    valueType: 'boolean',
+    defaultValue: false,
+    localParse: (raw) => parseBoolean(raw, false),
+    localSerialize: (value) => serializeBoolean(Boolean(value)),
+  },
   prefetch_enabled: {
     id: 'prefetch_enabled',
     label: 'Background Sync',

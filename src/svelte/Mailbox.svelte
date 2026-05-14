@@ -82,6 +82,7 @@
     effectiveTheme,
     getEffectiveSettingValue,
     setSettingValue,
+    localSettingsVersion,
   } from '../stores/settingsStore';
   import {
     folders as foldersStore,
@@ -549,6 +550,12 @@
   const activeMsgId = $derived($selectedMessage?.id ?? null);
 
   let messageBody = chooseStore(source.state?.messageBody, mailboxView?.messageBody, '');
+  // Read view_plain_text reactively — re-evaluates when localSettingsVersion
+  // bumps so toggling the setting re-renders open messages without reload.
+  const viewPlainText = $derived.by(() => {
+    void $localSettingsVersion;
+    return Boolean(getEffectiveSettingValue('view_plain_text'));
+  });
   let attachments = chooseStore(source.state?.attachments, mailboxView?.attachments, []);
   let parsedInvite = $state<ParsedInvite | null>(null);
   let inviteToken = 0;
@@ -8278,7 +8285,9 @@
                             class={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
                           />
                           <span class="font-medium text-foreground truncate"
-                            >{extractDisplayName(message.from) || message.from}</span
+                            >{extractDisplayName(message.from) ||
+                              message.from ||
+                              '(no sender)'}</span
                           >
                           <span class="text-xs text-muted-foreground ml-auto shrink-0"
                             >{formatReaderDate(message.date)}</span
@@ -8391,6 +8400,7 @@
                             <EmailIframe
                               html={$messageBody}
                               messageId={$selectedMessage?.id || $selectedMessage?.uid || ''}
+                              plainText={viewPlainText}
                               onLinkClick={handleIframeLinkClick}
                               onFormSubmit={handleIframeFormSubmit}
                               onSwipe={handleIframeSwipe}
@@ -8412,6 +8422,7 @@
                             <EmailIframe
                               html={cachedBody.body}
                               messageId={message?.id || message?.uid || ''}
+                              plainText={viewPlainText}
                               onLinkClick={handleIframeLinkClick}
                               onFormSubmit={handleIframeFormSubmit}
                               onSwipe={handleIframeSwipe}
@@ -8462,7 +8473,9 @@
                       {#each allThreadAttachments as group}
                         {#if allThreadAttachments.length > 1}
                           <div class="text-xs text-muted-foreground mb-1.5 mt-3 first:mt-0">
-                            {extractDisplayName(group.message.from) || group.message.from}
+                            {extractDisplayName(group.message.from) ||
+                              group.message.from ||
+                              '(no sender)'}
                           </div>
                         {/if}
                         <div class="flex flex-wrap gap-2">
@@ -8629,6 +8642,7 @@
                     <EmailIframe
                       html={$messageBody}
                       messageId={$selectedMessage?.id || $selectedMessage?.uid || ''}
+                      plainText={viewPlainText}
                       onLinkClick={handleIframeLinkClick}
                       onFormSubmit={handleIframeFormSubmit}
                       onSwipe={handleIframeSwipe}

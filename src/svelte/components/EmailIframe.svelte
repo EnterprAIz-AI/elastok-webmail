@@ -1,18 +1,28 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { buildIframeSrcdoc } from '../../utils/iframe-srcdoc';
+  import { htmlToPlainText } from '../../utils/sanitize.js';
   import { isTauri } from '../../utils/platform.js';
 
   interface Props {
     html: string;
     messageId: string;
+    plainText?: boolean;
     onLinkClick?: (url: string, isMailto: boolean) => void;
     onHeightChange?: (height: number) => void;
     onFormSubmit?: (action: string, method: string, data: Record<string, unknown>) => void;
     onSwipe?: (phase: 'start' | 'move' | 'end', detail: Record<string, unknown>) => void;
   }
 
-  let { html, messageId, onLinkClick, onHeightChange, onFormSubmit, onSwipe }: Props = $props();
+  let {
+    html,
+    messageId,
+    plainText = false,
+    onLinkClick,
+    onHeightChange,
+    onFormSubmit,
+    onSwipe,
+  }: Props = $props();
 
   // State declarations
   let iframeRef: HTMLIFrameElement | null = $state(null);
@@ -43,14 +53,21 @@
   // - hasContent: recreate when content arrives (0 -> N transition)
   // Note: We use boolean hasContent, NOT content length, to avoid loops when content changes slightly
   const hasContent = $derived(html && html.length > 0);
-  const contentSignature = $derived(`${messageId}:${themeVersion}:${hasContent}`);
+  // Include plainText in the signature so toggling re-creates the iframe and
+  // re-measures height for the new rendering mode.
+  const contentSignature = $derived(`${messageId}:${themeVersion}:${hasContent}:${plainText}`);
 
-  // Build srcdoc — reactively updates when html or dark mode changes. The
-  // runtime script is loaded from /email-iframe.js (parent origin) and uses
-  // `*` as postMessage target; we validate event.source on receive.
+  // Build srcdoc — reactively updates when html, dark mode, or plain-text
+  // mode changes. The runtime script is loaded from /email-iframe.js (parent
+  // origin) and uses `*` as postMessage target; we validate event.source on
+  // receive.
   const srcdoc = $derived.by(() => {
     const darkMode = mounted ? isDarkMode : detectDarkMode();
-    return buildIframeSrcdoc(html || '', darkMode);
+    const source = html || '';
+    if (plainText) {
+      return buildIframeSrcdoc(htmlToPlainText(source), darkMode, true);
+    }
+    return buildIframeSrcdoc(source, darkMode, false);
   });
 
   // Measure iframe content height directly via contentDocument.

@@ -181,6 +181,7 @@
   let editingKeyPassphrase = $state('');
   let blockRemoteImages = $state(false);
   let blockTrackingPixels = $state(true);
+  let viewPlainText = $state(false);
   let hideCompletedTodosValue = $state(false);
   let fontChoice = $state('system');
   let fontLoading = $state(false);
@@ -627,6 +628,7 @@
     blockTrackingPixels = Boolean(
       getEffectiveSettingValue('block_tracking_pixels', { account: currentAcct }),
     );
+    viewPlainText = Boolean(getEffectiveSettingValue('view_plain_text', { account: currentAcct }));
     hideCompletedTodosValue = Boolean(
       getEffectiveSettingValue('hide_completed_todos', { account: currentAcct }),
     );
@@ -1023,6 +1025,18 @@
       );
     } catch (err) {
       toasts?.show?.((err as Error)?.message || 'Failed to update tracking pixel setting', 'error');
+    }
+  };
+
+  const toggleViewPlainText = () => {
+    try {
+      setSettingValue('view_plain_text', viewPlainText, { account: getAccountId() });
+      toasts?.show?.(
+        viewPlainText ? 'Emails will render as plain text' : 'Emails will render with formatting',
+        'success',
+      );
+    } catch (err) {
+      toasts?.show?.((err as Error)?.message || 'Failed to update plain text setting', 'error');
     }
   };
 
@@ -1442,6 +1456,7 @@
 <div
   class="flex h-14 items-center gap-3 px-4"
   style="padding-top: env(safe-area-inset-top, 0px); box-sizing: content-box;"
+  data-testid="settings-header"
 >
   <Button variant="ghost" size="icon" onclick={() => window.history.back()} aria-label="Back">
     <ChevronLeft class="h-5 w-5" />
@@ -1957,6 +1972,14 @@
             </label>
             <p class="text-sm text-muted-foreground">
               Blocks tiny invisible images used to track email opens.
+            </p>
+            <label class="flex items-center gap-3">
+              <Checkbox bind:checked={viewPlainText} onCheckedChange={toggleViewPlainText} />
+              <span>View emails as plain text</span>
+            </label>
+            <p class="text-sm text-muted-foreground">
+              Strip HTML, CSS, and remote content from incoming emails and render them as plain
+              text. Links and image alt text are preserved.
             </p>
           </Card.Content>
         </Card.Root>

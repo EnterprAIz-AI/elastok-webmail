@@ -69,20 +69,59 @@
     onContext?.(event, item);
   };
 
-  const lastMessage = $derived(
-    threaded ? (item as ConversationItem)?.messages?.slice?.(-1)?.[0] : (item as Message),
+  // Walk back through the thread to the most recent message that actually
+  // has a usable `from` (or `to` in sent folder). This guards against the
+  // common case where the latest message is a calendar response, MDN/DSN,
+  // or any auto-generated reply with a missing/unparseable from header —
+  // we'd otherwise render the entire conversation as "(no sender)".
+  const pickLatestWithField = (
+    messages: Message[] | undefined,
+    field: 'from' | 'to',
+  ): Message | undefined => {
+    if (!Array.isArray(messages) || messages.length === 0) return undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i] as Message & Record<string, unknown>;
+      const value = m?.[field] || (m?.[field === 'from' ? 'From' : 'To'] as unknown);
+      if (typeof value === 'string' ? value.trim() : value) return m;
+    }
+    return messages[messages.length - 1];
+  };
+
+  const fromMessage = $derived(
+    threaded
+      ? pickLatestWithField((item as ConversationItem)?.messages, 'from')
+      : (item as Message),
+  );
+  const toMessage = $derived(
+    threaded ? pickLatestWithField((item as ConversationItem)?.messages, 'to') : (item as Message),
   );
   const fromName = $derived(
     extractDisplayName(
-      (lastMessage as Message)?.from || ((lastMessage as Record<string, unknown>)?.From as string),
+      (fromMessage as Message)?.from || ((fromMessage as Record<string, unknown>)?.From as string),
     ),
   );
   const toName = $derived(
     extractDisplayName(
-      (lastMessage as Message)?.to || ((lastMessage as Record<string, unknown>)?.To as string),
+      (toMessage as Message)?.to || ((toMessage as Record<string, unknown>)?.To as string),
     ),
   );
-  const from = $derived(isSentFolder ? `To: ${toName || fromName}` : fromName);
+  // Display the raw stored `from` as a secondary fallback so a bare email
+  // string still shows up instead of "(no sender)".
+  const rawFrom = $derived(
+    (fromMessage as Message)?.from ||
+      ((fromMessage as Record<string, unknown>)?.From as string) ||
+      '',
+  );
+  const from = $derived(
+    isSentFolder
+      ? `To: ${toName || fromName || rawFrom || '(no sender)'}`
+      : fromName || rawFrom || '(no sender)',
+  );
+  // Keep `lastMessage` for any downstream references to the trailing message
+  // even if it has no sender data of its own.
+  const lastMessage = $derived(
+    threaded ? (item as ConversationItem)?.messages?.slice?.(-1)?.[0] : (item as Message),
+  );
   const subject = $derived((lastMessage as Message)?.subject || '(No subject)');
   const snippet = $derived(truncatePreview((lastMessage as Message)?.snippet || ''));
   const date = $derived(

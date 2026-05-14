@@ -16,10 +16,29 @@ function parentOrigin(): string {
     : "'self'";
 }
 
-export function buildIframeSrcdoc(emailHtml: string, isDarkMode: boolean = false): string {
+function escapeForPreText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function linkifyEscapedText(escapedText: string): string {
+  // Operate on already-escaped text so we don't introduce new HTML
+  return escapedText.replace(
+    /(https?:\/\/[^\s<>"']+|mailto:[^\s<>"']+)/g,
+    (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`,
+  );
+}
+
+export function buildIframeSrcdoc(
+  emailHtml: string,
+  isDarkMode: boolean = false,
+  plainText: boolean = false,
+): string {
   const bodyClass = isDarkMode ? 'fe-iframe-dark' : 'fe-iframe-light';
   const origin = parentOrigin();
   const scriptSrc = `${origin}${SCRIPT_URL}`;
+  const content = plainText
+    ? `<pre class="fe-email-plaintext">${linkifyEscapedText(escapeForPreText(emailHtml))}</pre>`
+    : emailHtml;
 
   return `<!DOCTYPE html>
 <html>
@@ -31,15 +50,31 @@ export function buildIframeSrcdoc(emailHtml: string, isDarkMode: boolean = false
     ${getResetStyles()}
     ${getAppearanceStyles()}
     ${getQuoteToggleStyles()}
+    ${getPlainTextStyles()}
   </style>
 </head>
 <body class="${bodyClass}">
   <div class="fe-email-content">
-    ${emailHtml}
+    ${content}
   </div>
   <script src="${scriptSrc}"></script>
 </body>
 </html>`;
+}
+
+function getPlainTextStyles(): string {
+  return `
+    .fe-email-plaintext {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow-wrap: anywhere;
+      margin: 0;
+      padding: 0;
+    }
+  `;
 }
 
 function getResetStyles(): string {

@@ -1892,12 +1892,18 @@ function openInNewTab(content, mime = 'text/html') {
 
 async function openInNewTabTauri(content, mime) {
   const { writeFile } = await import('@tauri-apps/plugin-fs');
-  const { tempDir } = await import('@tauri-apps/api/path');
+  const { tempDir, join } = await import('@tauri-apps/api/path');
   const { open } = await import('@tauri-apps/plugin-opener');
 
-  const ext = mime === 'text/html' ? 'html' : 'txt';
+  // Filename pattern must stay in sync with the opener scope in
+  // src-tauri/capabilities/default.json — the Tauri opener plugin only
+  // allows opening files under $TEMP/forwardemail-original-*.{html,txt,eml}.
+  const ext = mime === 'text/html' ? 'html' : mime === 'message/rfc822' ? 'eml' : 'txt';
   const tmp = await tempDir();
-  const filePath = `${tmp}forwardemail-original-${Date.now()}.${ext}`;
+  // Use `join` rather than string concatenation — on Windows, `tempDir()`
+  // does not always return a trailing separator, which previously yielded
+  // a malformed path like `C:\Users\...\Tempforwardemail-original-…`.
+  const filePath = await join(tmp, `forwardemail-original-${Date.now()}.${ext}`);
 
   const data =
     typeof content === 'string' ? new TextEncoder().encode(content) : new Uint8Array(content);

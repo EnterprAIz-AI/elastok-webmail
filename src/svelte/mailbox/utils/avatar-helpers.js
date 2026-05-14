@@ -29,14 +29,33 @@ export const getToDisplay = (message) => {
 };
 
 /**
+ * Find the most recent message in the conversation that has a non-empty
+ * value for the given field, walking from newest → oldest.
+ *
+ * Guards against the common case where the latest message is a calendar
+ * response / MDN / auto-reply with a missing `from`, which would otherwise
+ * cause the entire conversation row to render as "(no sender)".
+ */
+const pickLatestWithField = (messages, field) => {
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+  const altField = field === 'from' ? 'From' : field === 'to' ? 'To' : null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    const value = m && (m[field] || (altField ? m[altField] : null));
+    if (typeof value === 'string' ? value.trim() : value) return m;
+  }
+  return messages[messages.length - 1];
+};
+
+/**
  * Get display name from conversation's latest message
  * @param {Object} conv - Conversation object
  * @returns {string} Display name or email
  */
 export const getConversationFromDisplay = (conv) => {
   if (!conv) return '';
-  const latest = Array.isArray(conv.messages) ? conv.messages[conv.messages.length - 1] : null;
-  const display = getFromDisplay(latest);
+  const target = Array.isArray(conv.messages) ? pickLatestWithField(conv.messages, 'from') : null;
+  const display = getFromDisplay(target);
   return display || conv.latestFrom || conv.from || '';
 };
 
@@ -47,8 +66,8 @@ export const getConversationFromDisplay = (conv) => {
  */
 export const getConversationToDisplay = (conv) => {
   if (!conv) return '';
-  const latest = Array.isArray(conv.messages) ? conv.messages[conv.messages.length - 1] : null;
-  return getToDisplay(latest);
+  const target = Array.isArray(conv.messages) ? pickLatestWithField(conv.messages, 'to') : null;
+  return getToDisplay(target);
 };
 
 /**
@@ -88,20 +107,25 @@ export const getMessageToName = (msg) => extractDisplayName(getToDisplay(msg));
 export const getInitials = (from) => {
   if (!from) return '??';
   const displayName = extractDisplayName(from);
+  // extractDisplayName now returns '' on empty/unparseable input; keep the
+  // raw `from` string as a last-resort source so the avatar always shows
+  // something letter-like instead of empty space.
+  const source = displayName || (typeof from === 'string' ? from : '');
+  if (!source) return '??';
 
   // If it's just an email, use first two letters
-  if (displayName.includes('@')) {
-    return displayName.substring(0, 2).toUpperCase();
+  if (source.includes('@')) {
+    return source.substring(0, 2).toUpperCase();
   }
 
   // If it's a name, get initials from first and last name
-  const parts = displayName.trim().split(/\s+/);
+  const parts = source.trim().split(/\s+/).filter(Boolean);
   if (parts.length >= 2) {
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
 
   // Single word name - take first two letters
-  return displayName.substring(0, 2).toUpperCase();
+  return source.substring(0, 2).toUpperCase() || '??';
 };
 
 /**

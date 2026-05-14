@@ -3,6 +3,7 @@ import {
   normalizeMessageForCache,
   mergeFlagsAndMetadata,
   didMetadataChange,
+  extractFromField,
 } from '../../src/utils/sync-helpers.ts';
 
 describe('sync helpers', () => {
@@ -121,5 +122,59 @@ describe('sync helpers', () => {
     };
 
     expect(didMetadataChange(candidate, existing)).toBe(false);
+  });
+});
+
+describe('extractFromField fallbacks', () => {
+  it('returns empty string when no source has from-like data', () => {
+    expect(extractFromField({})).toBe('');
+  });
+
+  it('uses Sender: header when From: is absent', () => {
+    const raw = {
+      nodemailer: {
+        headers: { sender: 'Mailing List <list@example.com>' },
+      },
+    };
+    expect(extractFromField(raw)).toContain('list@example.com');
+  });
+
+  it('falls back to Return-Path header', () => {
+    const raw = {
+      nodemailer: {
+        headers: { 'return-path': '<bounces@notify.example.com>' },
+      },
+    };
+    expect(extractFromField(raw)).toBe('bounces@notify.example.com');
+  });
+
+  it('falls back to envelope.from on nodemailer', () => {
+    const raw = {
+      nodemailer: { envelope: { from: 'envelope@example.com' } },
+    };
+    expect(extractFromField(raw)).toBe('envelope@example.com');
+  });
+
+  it('falls back to Message-ID domain when nothing else is available', () => {
+    const raw = { message_id: '<abc.def@auto.example.com>' };
+    expect(extractFromField(raw)).toBe('<unknown@auto.example.com>');
+  });
+
+  it('prefers structured nodemailer.from over fallback chain', () => {
+    const raw = {
+      nodemailer: {
+        from: { name: 'Real Person', address: 'real@example.com' },
+        envelope: { from: 'envelope@example.com' },
+      },
+    };
+    expect(extractFromField(raw)).toContain('real@example.com');
+  });
+
+  it('normalizes empty mailparser object via fallback', () => {
+    const raw = {
+      from: { value: [], text: '' },
+      nodemailer: { envelope: { from: 'bounce@example.com' } },
+    };
+    expect(extractFromField(raw)).toBe('bounce@example.com');
   });
 });

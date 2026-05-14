@@ -7,7 +7,11 @@
 
 import PostalMime from 'postal-mime';
 import * as openpgp from 'openpgp';
-import { normalizeMessageForCache, mergeFlagsAndMetadata } from '../utils/sync-helpers.ts';
+import {
+  normalizeMessageForCache,
+  mergeFlagsAndMetadata,
+  extractFromField,
+} from '../utils/sync-helpers.ts';
 import { normalizeSubject } from '../utils/threading.ts';
 import {
   bufferToDataUrl,
@@ -403,6 +407,13 @@ async function runMetadataTask(task, postProgress) {
     page += 1;
   }
 
+  // Opportunistic one-shot heal of rows previously stored with empty `from`.
+  // Bounded per session per (account+folder) so we don't re-hit the server
+  // on every sync tick. Failures are logged but never propagate.
+  await runHealFromFieldPass(account, folder, 25).catch((err) => {
+    console.warn('[sync.worker] heal-from pass failed:', err);
+  });
+
   return {
     fetched: totalFetched,
     inserted: totalInserted,
@@ -410,6 +421,65 @@ async function runMetadataTask(task, postProgress) {
     lastUID,
     lastModSeq,
   };
+}
+
+// Keyed `${account}::${folder}` — prevents repeated heal scans within a
+// single worker lifetime. Cleared automatically when the worker restarts.
+const healedFromFieldFolders = new Set<string>();
+
+async function runHealFromFieldPass(account, folder, limit = 25) {
+  if (!dbPort || !account || !folder) return { healed: 0, scanned: 0 };
+  const sessionKey = `${account}::${folder}`;
+  if (healedFromFieldFolders.has(sessionKey)) return { healed: 0, scanned: 0 };
+  healedFromFieldFolders.add(sessionKey);
+
+  // Schema indexes `from`, so equals('') is an indexed scan. Filter to this
+  // (account, folder) in memory — Dexie compound-index queries don't allow
+  // mixing an equality on one indexed key with a different equality on
+  // another. The empty-from set is small in practice.
+  let empties = [];
+  try {
+    empties = await db.messages.where('from').equals('').toArray();
+  } catch (err) {
+    console.warn('[heal-from] query failed:', err);
+    return { healed: 0, scanned: 0 };
+  }
+  const scoped = empties
+    .filter((m) => m?.account === account && m?.folder === folder)
+    .slice(0, Math.max(1, Math.min(limit, 100)));
+  if (!scoped.length) return { healed: 0, scanned: 0 };
+
+  let healed = 0;
+  for (const msg of scoped) {
+    try {
+      const fixedFrom = await refetchAndExtractFrom(msg);
+      if (fixedFrom && fixedFrom !== msg.from) {
+        await db.messages.bulkPut([{ ...msg, from: fixedFrom }]);
+        healed += 1;
+      }
+    } catch (err) {
+      console.warn('[heal-from] failed for', msg?.id, err);
+    }
+  }
+  return { healed, scanned: scoped.length };
+}
+
+async function refetchAndExtractFrom(msg) {
+  if (!msg?.id) return '';
+  const url = new URL(`${apiBase.replace(/\/$/, '')}/v1/messages/${encodeURIComponent(msg.id)}`);
+  if (msg.folder) url.searchParams.set('folder', msg.folder);
+  const res = await fetchWithTimeout(url.toString(), {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: authHeader,
+    },
+  });
+  if (!res.ok) return '';
+  const detail = await res.json();
+  if (!detail || typeof detail !== 'object') return '';
+  const candidate = extractFromField(detail);
+  return hasFromValue(candidate) ? candidate : '';
 }
 
 async function runBodiesTask(task, postProgress) {

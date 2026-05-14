@@ -40,7 +40,7 @@
   import { closeTab } from '../../stores/tabStore';
   import { normalizeEmail, extractAddressList } from '../../utils/address.ts';
   import { getMessageApiId } from '../../utils/sync-helpers';
-  import { getEffectiveSettingValue } from '../../stores/settingsStore';
+  import { getEffectiveSettingValue, localSettingsVersion } from '../../stores/settingsStore';
   import {
     buildReplyQuotedBody,
     buildForwardQuotedBody,
@@ -85,6 +85,13 @@
   let showAllRecipients = $state(false);
   let showAllCc = $state(false);
   let error = $state('');
+
+  // Plain-text view setting — reactive to localSettingsVersion bumps so the
+  // user can toggle the setting without re-opening the message.
+  const viewPlainText = $derived.by(() => {
+    void $localSettingsVersion;
+    return Boolean(getEffectiveSettingValue('view_plain_text'));
+  });
 
   // Metadata from body load
   let messageMeta = $state<Record<string, unknown> | null>(null);
@@ -417,7 +424,7 @@
         <!-- Email Body -->
         {#if body}
           <div class="mb-6">
-            <EmailIframe html={body} {messageId} />
+            <EmailIframe html={body} {messageId} plainText={viewPlainText} />
           </div>
         {/if}
 

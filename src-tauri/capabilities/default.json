@@ -43,7 +43,15 @@
     "core:menu:default",
     "dialog:allow-save",
     "dialog:allow-open",
-    "opener:allow-open-path"
+    "fs:allow-temp-write",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$TEMP/forwardemail-original-*.html" },
+        { "path": "$TEMP/forwardemail-original-*.txt" },
+        { "path": "$TEMP/forwardemail-original-*.eml" }
+      ]
+    }
   ],
   "platforms": ["linux", "macOS", "windows", "android", "iOS"]
 }

@@ -308,13 +308,31 @@ describe('extractDisplayName', () => {
     expect(extractDisplayName([{ name: 'First', address: 'first@x.com' }])).toBe('First');
   });
 
-  it('returns "Unknown sender" for null/undefined', () => {
-    expect(extractDisplayName(null)).toBe('Unknown sender');
-    expect(extractDisplayName(undefined)).toBe('Unknown sender');
+  it('returns empty string for null/undefined', () => {
+    expect(extractDisplayName(null)).toBe('');
+    expect(extractDisplayName(undefined)).toBe('');
   });
 
-  it('returns "Unknown sender" for empty string', () => {
-    expect(extractDisplayName('')).toBe('Unknown sender');
+  it('returns empty string for empty input', () => {
+    expect(extractDisplayName('')).toBe('');
+    expect(extractDisplayName([])).toBe('');
+    expect(extractDisplayName({})).toBe('');
+  });
+
+  it('falls back to Sender: header when From: is absent', () => {
+    const msg = {
+      nodemailer: {
+        headers: { sender: 'Bot <bot@example.com>' },
+      },
+    };
+    expect(extractAddressList(msg, 'from')).toEqual(['Bot <bot@example.com>']);
+  });
+
+  it('does not fall back to Sender for non-from fields', () => {
+    const msg = {
+      nodemailer: { headers: { sender: 'Bot <bot@example.com>' } },
+    };
+    expect(extractAddressList(msg, 'to')).toEqual([]);
   });
 });
 

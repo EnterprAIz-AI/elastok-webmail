@@ -67,6 +67,65 @@ export function hasLabelData(raw: Record<string, unknown> = {}): boolean {
   );
 }
 
+const isDebugFromField = (): boolean => {
+  try {
+    return Local.get('debug_perf') === '1' || Local.get('debug_from_field') === '1';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Last-resort derivation of *some* from-string when all the structured
+ * sources (From, nodemailer.from, headers, envelope, Sender) come back
+ * empty. Better to render "via example.com" than an empty cell — and far
+ * better than persisting `''` which we can't distinguish from "never
+ * fetched" later.
+ *
+ * Probes (in order):
+ *   - Return-Path: header (set by every receiving MTA)
+ *   - nodemailer.envelope.from / msg.envelope.from
+ *   - Message-ID's domain (extract the @host part of a stored message_id)
+ */
+function deriveFromFallback(raw: RawMessage): string {
+  const headers =
+    (raw.nodemailer?.headers as Record<string, string> | undefined) ||
+    (raw.nodemailer?.Headers as Record<string, string> | undefined) ||
+    {};
+  const probeHeader = (name: string): string => {
+    const lower = name.toLowerCase();
+    const direct = headers[name] || headers[lower];
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+    const matchKey = Object.keys(headers).find((key) => key.toLowerCase() === lower);
+    if (matchKey && typeof headers[matchKey] === 'string') return headers[matchKey].trim();
+    return '';
+  };
+
+  const returnPath = probeHeader('Return-Path');
+  if (returnPath) {
+    const stripped = returnPath.replace(/^<|>$/g, '').trim();
+    if (stripped) return stripped;
+  }
+
+  const envFrom =
+    raw.nodemailer?.envelope?.from || (raw.envelope as { from?: string } | undefined)?.from;
+  if (typeof envFrom === 'string' && envFrom.trim()) return envFrom.trim();
+
+  const messageId =
+    (raw.message_id as string) ||
+    (raw.MessageId as string) ||
+    (raw['Message-ID'] as string) ||
+    headers['message-id'] ||
+    headers['Message-ID'] ||
+    '';
+  if (typeof messageId === 'string') {
+    const match = messageId.match(/@([^>\s]+)/);
+    if (match?.[1]) return `<unknown@${match[1].trim()}>`;
+  }
+
+  return '';
+}
+
 export function extractFromField(raw: RawMessage): string {
   const parsedList = extractAddressList(raw as never, 'from');
   const parsedDisplay = displayAddresses(parsedList).join(', ');
@@ -77,22 +136,36 @@ export function extractFromField(raw: RawMessage): string {
   const fromVal =
     (raw.From as AddressObject) || (raw.from as AddressObject) || raw.nodemailer?.from;
 
+  let primary = '';
   if (!fromVal) {
     const senderDisplay = toDisplayAddress(raw.sender as AddressObject);
-    return senderDisplay || (typeof raw.sender === 'string' ? raw.sender : '');
+    primary = senderDisplay || (typeof raw.sender === 'string' ? raw.sender : '');
+  } else if (Array.isArray(fromVal)) {
+    primary = displayAddresses(fromVal).join(', ');
+  } else if (
+    typeof fromVal === 'object' &&
+    Array.isArray((fromVal as { value?: unknown[] }).value)
+  ) {
+    primary = displayAddresses((fromVal as { value: AddressObject[] }).value).join(', ');
+  }
+  if (!primary) {
+    primary = toDisplayAddress(fromVal) || '';
+  }
+  if (primary) return primary;
+
+  const fallback = deriveFromFallback(raw);
+  if (fallback) return fallback;
+
+  if (isDebugFromField()) {
+    console.warn('[sync-helpers] extractFromField: no from derivable', {
+      id: raw.id || raw.Id || raw.uid || raw.Uid,
+      keys: Object.keys(raw || {}),
+      nodemailerKeys: raw.nodemailer ? Object.keys(raw.nodemailer) : null,
+      headerKeys: raw.nodemailer?.headers ? Object.keys(raw.nodemailer.headers) : null,
+    });
   }
 
-  if (Array.isArray(fromVal)) {
-    const listDisplay = displayAddresses(fromVal).join(', ');
-    if (listDisplay) return listDisplay;
-  }
-
-  if (typeof fromVal === 'object' && Array.isArray((fromVal as { value?: unknown[] }).value)) {
-    const listDisplay = displayAddresses((fromVal as { value: AddressObject[] }).value).join(', ');
-    if (listDisplay) return listDisplay;
-  }
-
-  return toDisplayAddress(fromVal) || '';
+  return '';
 }
 
 export function extractRecipientsField(raw: RawMessage, field: string = 'to'): string {

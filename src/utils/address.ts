@@ -243,6 +243,31 @@ export const extractAddressList = (
   if (Array.isArray(alt)) return alt as (string | AddressObject)[];
   if (alt) return recipientsToList(alt as AddressInput);
   if (msg?.[field]) return recipientsToList(msg[field] as AddressInput);
+
+  // RFC 5322 §3.6.2 — a message MAY use Sender: when From: is absent
+  // (mailing lists, MDN/DSN reports, automated services). Treat it as a
+  // last-resort source for the from field so we don't render empty senders.
+  if (field === 'from') {
+    const senderHeader =
+      findHeaderValue(msg?.nodemailer?.headers, 'sender') ||
+      findHeaderValue(msg?.headers as Record<string, string> | string | undefined, 'sender') ||
+      findHeaderValue(msg?.header, 'sender') ||
+      findHeaderLineValue(msg?.nodemailer?.headerLines, 'sender') ||
+      findHeaderLineValue(msg?.headerLines, 'sender') ||
+      findHeaderValue(msg?.raw, 'sender');
+    if (senderHeader) {
+      const normalized = normalizeHeaderValue(senderHeader);
+      if (normalized.length) return normalized;
+    }
+    const senderField =
+      (msg as Record<string, unknown> | null | undefined)?.sender ??
+      (msg as Record<string, unknown> | null | undefined)?.Sender;
+    if (senderField) {
+      const normalized = normalizeHeaderValue(senderField);
+      if (normalized.length) return normalized;
+    }
+  }
+
   return [];
 };
 
@@ -384,7 +409,7 @@ export const extractDisplayName = (from: AddressInput): string => {
 
   const raw = normalizeFrom(from);
   if (!raw || typeof raw !== 'string') {
-    return 'Unknown sender';
+    return '';
   }
 
   // Match pattern: "Name" <email> or Name <email>
