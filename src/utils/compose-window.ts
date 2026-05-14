@@ -12,14 +12,22 @@
  * This avoids race conditions from fixed-delay timers.
  */
 
+import { get } from 'svelte/store';
 import { Local } from './storage';
+import { folders as foldersStore } from '../stores/folderStore';
+import { resolveSentFolder } from './sent-folder';
 
 let composeCounter = 0;
 
 // Pending init data keyed by window label — consumed on compose:ready
 const pendingInits = new Map<
   string,
-  { action: string; prefill: Record<string, unknown>; auth: Record<string, string> }
+  {
+    action: string;
+    prefill: Record<string, unknown>;
+    auth: Record<string, string>;
+    sentFolder: string;
+  }
 >();
 
 /**
@@ -76,10 +84,14 @@ export async function openComposeWindow(options?: ComposeWindowOptions): Promise
     // Store init data for when the window signals ready.
     // Include auth credentials for Windows WebView2 compatibility
     // (WebView2 may isolate localStorage per webview).
+    // Resolve the Sent folder here in the main window — it has the folder
+    // store + settings hydrated; the compose window has neither, so it can't
+    // resolve this itself and would otherwise fall back to a bare "Sent".
     pendingInits.set(label, {
       action: options?.action || 'open',
       prefill: options?.prefill || {},
       auth: collectAuth(),
+      sentFolder: resolveSentFolder(Local.get('email') || 'default', get(foldersStore)),
     });
 
     // Defer WebviewWindow creation off the current AppKit event tick.

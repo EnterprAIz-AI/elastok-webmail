@@ -112,10 +112,11 @@ async function initFromTauriEvent() {
       if (initialized) return;
       initialized = true;
 
-      const { action, prefill, auth } = event.payload as {
+      const { action, prefill, auth, sentFolder } = event.payload as {
         action?: string;
         prefill?: Record<string, unknown>;
         auth?: Record<string, string>;
+        sentFolder?: string;
       };
 
       // Inject auth credentials into storage for this webview.
@@ -135,6 +136,12 @@ async function initFromTauriEvent() {
             }
           }
         }
+      }
+
+      // Hand over the Sent folder resolved by the main window so the compose
+      // window can save its own Sent copy (with full attachment content).
+      if (sentFolder && typeof composeApi.setSentFolder === 'function') {
+        composeApi.setSentFolder(sentFolder);
       }
 
       if (action === 'reply' && typeof composeApi.reply === 'function') {

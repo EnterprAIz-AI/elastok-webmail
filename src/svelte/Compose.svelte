@@ -150,6 +150,7 @@
     isMinimized?: () => boolean;
     saveDraft?: () => void;
     updateReplyBody?: (body?: string, options?: { focusTop?: boolean }) => void;
+    setSentFolder?: (folder: string) => void;
     visibility?: { subscribe: (fn: (val: boolean) => void) => () => void };
   }
 
@@ -168,6 +169,10 @@
   }: Props = $props();
 
   let visible = $state(false);
+  // Sent folder resolved by the main window and passed in via the compose
+  // window handshake — the native compose window has no IDB folder store of
+  // its own. Null in the in-app (non-native) compose, which resolves normally.
+  let nativeSentFolder = $state<string | null>(null);
   const visibility = writable(false);
   let expanded = $state(false);
   let minimized = $state(false);
@@ -2300,12 +2305,25 @@
       delete apiPayload._replyToMessageId;
       delete apiPayload._replyToMessageFolder;
       await Remote.request('Emails', apiPayload, { method: 'POST' });
-      // In native window, the main window handles sent copy + \Answered flag
-      // via the compose:sent event (IDB isn't available in the compose webview).
       if (!nativeWindow) {
         await saveSentCopyWrapper(payload);
         // Mark original message as \Answered after successful reply
         markOriginalAsAnswered();
+      } else {
+        // Native compose window: save the Sent copy here, where `payload`
+        // still carries full attachment content. This used to be delegated
+        // to the main window via a stripped-down sentCopyPayload, which
+        // dropped attachments from the Sent folder entirely. The compose
+        // window has working network + auth (it just sent the email); the
+        // only thing it lacks is the IDB folder store, so we use the Sent
+        // folder the main window resolved and handed over at open time.
+        // The \Answered flag + draft cleanup still run in the main window
+        // (those need IDB) — see the compose:sent handler in main.ts.
+        try {
+          await saveSentCopy(payload, Local.get('email') || null, null, nativeSentFolder);
+        } catch (sentErr) {
+          console.error('[Compose] Failed to save sent copy (native window):', sentErr);
+        }
       }
       // Capture IDs before reset() clears them — needed for cleanup
       const msgIdToDelete = sourceMessageId;
@@ -2648,6 +2666,9 @@
       isMinimized,
       saveDraft: saveDraftFn,
       updateReplyBody,
+      setSentFolder: (folder: string) => {
+        nativeSentFolder = folder;
+      },
       visibility,
     });
     const handleClickOutside = (event: MouseEvent) => {

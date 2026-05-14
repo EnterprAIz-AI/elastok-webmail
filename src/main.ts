@@ -1085,15 +1085,11 @@ if (isTauriDesktop) {
         }
       }
 
-      // Save sent copy — the native compose window can't access IDB so we handle it here
+      // The native compose window now saves its own Sent copy (it has the
+      // full attachment content; the main window only ever received a
+      // stripped payload and produced attachment-less Sent entries). Here we
+      // just do the IDB-dependent follow-ups the compose window can't.
       if (result?.sentCopyPayload) {
-        try {
-          const { saveSentCopy } = await import('./utils/sent-copy.js');
-          await saveSentCopy(result.sentCopyPayload);
-        } catch (error) {
-          console.warn('[main] Failed to save sent copy:', error);
-        }
-
         // Set \Answered flag on the original message if this was a reply
         const origId = result.sentCopyPayload.replyToMessageId as string;
         if (origId) {
