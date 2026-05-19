@@ -168,6 +168,37 @@ jobs:
           conf.bundle.createUpdaterArtifacts = true;
           fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
 
+      # Defensive check: tauri-action silently produces an unsigned macOS
+      # bundle if any signing/notarization secret is empty at build time.
+      # When that ships, users see "the application can't be opened" with
+      # no Gatekeeper dialog because taskgated rejects the binary before
+      # dyld_start completes (CS_LINKER_SIGNED only, no Developer ID).
+      # Fail fast here so a misconfigured run is a loud red X instead of
+      # a broken release.
+      - name: Require macOS signing secrets on macOS rows
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=()
+          [ -z "$APPLE_CERTIFICATE" ]          && missing+=("APPLE_CERTIFICATE")
+          [ -z "$APPLE_CERTIFICATE_PASSWORD" ] && missing+=("APPLE_CERTIFICATE_PASSWORD")
+          [ -z "$APPLE_SIGNING_IDENTITY" ]     && missing+=("APPLE_SIGNING_IDENTITY")
+          [ -z "$APPLE_ID" ]                   && missing+=("APPLE_ID")
+          [ -z "$APPLE_PASSWORD" ]             && missing+=("APPLE_PASSWORD")
+          [ -z "$APPLE_TEAM_ID" ]              && missing+=("APPLE_TEAM_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Refusing to build unsigned macOS bundle on ${{ matrix.label }}. Missing secrets: ${missing[*]}"
+            exit 1
+          fi
+          echo "All Apple signing/notary secrets present for ${{ matrix.label }}."
+
       - name: Build and release Tauri app
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
