@@ -190,7 +190,10 @@ jobs:
           path: |
             ~/.cargo/bin/tauri-webdriver
             ~/.cargo/bin/tauri-webdriver.exe
-          key: ${{ runner.os }}-${{ runner.arch }}-tauri-webdriver-v0.1.2
+          # Include matrix.label so ubuntu-22.04 and ubuntu-24.04 don't share
+          # a binary — a cache populated on 24.04 links against GLIBC_2.39
+          # and won't run on 22.04 ("GLIBC_2.39 not found").
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.label }}-tauri-webdriver-v0.1.2
 
       - name: Install tauri-webdriver intermediary
         if: steps.gate.outputs.skip != 'true' && steps.cache-twd.outputs.cache-hit != 'true'

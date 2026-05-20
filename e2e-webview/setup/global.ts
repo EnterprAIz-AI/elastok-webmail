@@ -1,13 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { setTimeout as delay } from 'node:timers/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const HOST = '127.0.0.1';
-const PORT = 4444;
 const READY_TIMEOUT_MS = 30_000;
-const POLL_INTERVAL_MS = 250;
-const STATUS_URL = `http://${HOST}:${PORT}/status`;
+// The intermediary prints this marker to stdout once its listener is bound.
+// We can't HTTP-probe /status because the intermediary forwards /status to
+// the in-app server on :4445, which isn't spawned until a per-spec
+// `webdriverio.remote()` call delivers the binary-path capability — so any
+// pre-session HTTP probe fails by design.
+const READY_MARKER = /tauri-webdriver running on port/i;
 
 const REPORTS_DIR = path.resolve('./reports');
 fs.mkdirSync(REPORTS_DIR, { recursive: true });
@@ -23,53 +24,48 @@ export default async function globalSetup() {
     shell: process.platform === 'win32',
   });
 
-  driver.stdout?.on('data', (chunk: Buffer) => {
-    stdoutLog.write(chunk);
-    process.stdout.write(chunk);
-  });
-  driver.stderr?.on('data', (chunk: Buffer) => {
-    stderrLog.write(chunk);
-    process.stderr.write(chunk);
-  });
-
-  type ExitInfo = { code: number | null; signal: NodeJS.Signals | null };
-  const exitState: { value: ExitInfo | null } = { value: null };
-  driver.once('exit', (code, signal) => {
-    exitState.value = { code, signal };
-  });
-
-  const spawnFailed = new Promise<never>((_, reject) => {
-    driver.once('error', (err) =>
-      reject(new Error(`tauri-webdriver failed to spawn: ${(err as Error).message}`)),
-    );
-  });
-
-  const ready = (async () => {
-    const deadline = Date.now() + READY_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const exited = exitState.value;
-      if (exited) {
-        throw new Error(
-          `tauri-webdriver exited during startup (code=${exited.code}, signal=${exited.signal}). ` +
+  const ready = new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `tauri-webdriver did not print readiness marker within ${READY_TIMEOUT_MS}ms. ` +
             `See ${path.relative(process.cwd(), stderrPath)} for driver output.`,
-        );
+        ),
+      );
+    }, READY_TIMEOUT_MS);
+
+    let stdoutBuf = '';
+    driver.stdout?.on('data', (chunk: Buffer) => {
+      stdoutLog.write(chunk);
+      process.stdout.write(chunk);
+      stdoutBuf += chunk.toString('utf8');
+      if (READY_MARKER.test(stdoutBuf)) {
+        clearTimeout(timer);
+        resolve();
       }
-      try {
-        const res = await fetch(STATUS_URL, { signal: AbortSignal.timeout(1_000) });
-        if (res.ok) return;
-      } catch {
-        // not yet — keep polling
-      }
-      await delay(POLL_INTERVAL_MS);
-    }
-    throw new Error(
-      `tauri-webdriver did not become ready on ${STATUS_URL} within ${READY_TIMEOUT_MS}ms. ` +
-        `See ${path.relative(process.cwd(), stderrPath)} for driver output.`,
-    );
-  })();
+    });
+    driver.stderr?.on('data', (chunk: Buffer) => {
+      stderrLog.write(chunk);
+      process.stderr.write(chunk);
+    });
+
+    driver.once('error', (err) => {
+      clearTimeout(timer);
+      reject(new Error(`tauri-webdriver failed to spawn: ${(err as Error).message}`));
+    });
+    driver.once('exit', (code, signal) => {
+      clearTimeout(timer);
+      reject(
+        new Error(
+          `tauri-webdriver exited during startup (code=${code}, signal=${signal}). ` +
+            `See ${path.relative(process.cwd(), stderrPath)} for driver output.`,
+        ),
+      );
+    });
+  });
 
   try {
-    await Promise.race([ready, spawnFailed]);
+    await ready;
   } catch (err) {
     if (driver.exitCode === null && !driver.killed) driver.kill('SIGTERM');
     stdoutLog.end();
