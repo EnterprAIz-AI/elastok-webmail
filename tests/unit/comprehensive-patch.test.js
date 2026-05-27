@@ -1373,3 +1373,117 @@ describe('pre-release regression guards', () => {
     expect(macBranch).not.toContain('@tauri-apps/plugin-dialog');
   });
 });
+
+// ============================================================
+// 12. Round-2 fix regression guards (May 2026 follow-up batch)
+// ============================================================
+describe('round-2 fix regression guards', () => {
+  const messageRowSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../src/svelte/MessageRow.svelte'),
+    'utf8',
+  );
+  const calendarSrc = fs.readFileSync(
+    path.resolve(__dirname, '../../src/svelte/Calendar.svelte'),
+    'utf8',
+  );
+  const mailboxSrcR2 = fs.readFileSync(
+    path.resolve(__dirname, '../../src/svelte/Mailbox.svelte'),
+    'utf8',
+  );
+  const tokensSrc = fs.readFileSync(path.resolve(__dirname, '../../src/styles/tokens.css'), 'utf8');
+  const indexHtmlSrc = fs.readFileSync(path.resolve(__dirname, '../../index.html'), 'utf8');
+
+  it('MessageRow binds unread to font weight on both from line and subject', () => {
+    // Pre-fix: from line was unconditionally font-semibold, subject was
+    // unconditionally font-medium — only the bg-primary/5 tint cued unread.
+    // Now: bold for unread, normal for read on both.
+    expect(messageRowSrc).toContain("{unread\n          ? 'font-bold'\n          : 'font-normal'}");
+    expect(messageRowSrc).toContain("{unread ? 'font-semibold' : 'font-normal'}");
+  });
+
+  it('Calendar applyRemoteChange triggers a fresh event fetch for CREATE/UPDATE', () => {
+    // Pre-fix: applyRemoteChange called load(), which only refetches the
+    // calendar list — not events. So WS-driven calendarEventCreated /
+    // calendarEventUpdated payloads didn't surface in the events grid.
+    expect(calendarSrc).toContain('const applyRemoteChange');
+    // Both fall-throughs (no payload, and after the calendarEventDeleted
+    // branch) must hit loadEventsForSelection(true).
+    expect(calendarSrc).toMatch(
+      /const applyRemoteChange[\s\S]{0,1500}loadEventsForSelection\(true\)/,
+    );
+    // load() now also force-refreshes events on re-activation (calendars
+    // already cached path) so events don't starve out on tab switches.
+    expect(calendarSrc).toMatch(
+      /const load\s*=\s*async[\s\S]{0,1200}else\s*\{[\s\S]{0,400}loadEventsForSelection\(true\)/,
+    );
+  });
+
+  it('handleFolderDrop re-points selection via nextCandidate after move', () => {
+    // Pre-fix: drag-drop left selectedMessage pinned to the moved row, so
+    // the reader pane kept showing the moved subject. Now: compute fallback
+    // *before* the move (source row still in list), apply after; if the
+    // fallback itself was part of the moved set, clear the reader instead.
+    expect(mailboxSrcR2).toContain('const handleFolderDrop');
+    const dropStart = mailboxSrcR2.indexOf('const handleFolderDrop');
+    const dropEnd = mailboxSrcR2.indexOf('const handleReaderSwipeStart', dropStart);
+    const dropBody = mailboxSrcR2.slice(dropStart, dropEnd);
+    expect(dropBody).toContain('const fallback = wasSelected ? nextCandidate() : null;');
+    expect(dropBody).toContain('if (wasSelected) {');
+    expect(dropBody).toContain('selectedMessage?.set?.(null);');
+  });
+
+  it('drag-hover folder expand uses a 2500ms delay', () => {
+    // Bumped from 1500ms because folder-tree shift mid-drag pushed the
+    // intended drop target off-screen even at 1.5s.
+    expect(mailboxSrcR2).toMatch(/toggleFolderExpansion\(folder\.path\);\s*\}\s*,\s*2500\)/);
+  });
+
+  it('row click dispatches through handleRowClick with modifier handling', () => {
+    // cmd/ctrl+click = additive toggle, shift+click = range select via
+    // lastSelectionAnchorId. Plain click sets anchor and calls open().
+    expect(mailboxSrcR2).toContain('let lastSelectionAnchorId');
+    expect(mailboxSrcR2).toContain('const handleRowClick');
+    expect(mailboxSrcR2).toMatch(/event\?\.metaKey\s*\|\|\s*event\?\.ctrlKey/);
+    expect(mailboxSrcR2).toMatch(/event\?\.shiftKey/);
+    // Both row variants (threaded conversation row, non-threaded message
+    // row) must call through handleRowClick, otherwise the modifiers are
+    // ignored for half the views.
+    expect(mailboxSrcR2).toContain('handleRowClick(conv, e, $filteredConversations || []');
+    expect(mailboxSrcR2).toContain('handleRowClick(msg, e, $filteredMessages || []');
+  });
+
+  it('dark theme surface tokens are at hue 0 with 0% saturation', () => {
+    // Previous palette held hue 240 at 4-6% sat. Pure grey (0 0% L%)
+    // removes the blue cast at full-window scale. Accent (199°) retained.
+    expect(tokensSrc).toContain('--background: 0 0% 6%;');
+    expect(tokensSrc).toContain('--card: 0 0% 8%;');
+    expect(tokensSrc).toContain('--popover: 0 0% 10%;');
+    expect(tokensSrc).toContain('--muted: 0 0% 16%;');
+    expect(tokensSrc).toContain('--border: 0 0% 18%;');
+    expect(tokensSrc).toContain('--sidebar-background: 0 0% 10%;');
+    // Accent must remain blue/cyan — these are intentional.
+    expect(tokensSrc).toContain('--primary: 199 89% 49%;');
+    expect(tokensSrc).toContain('--ring: 199 89% 49%;');
+  });
+
+  it('startup fatal-error overlay ignores WebDriver harness noise', () => {
+    // The overlay was catching WDIO "stale element reference" rejections
+    // and rendering a z-index:max panel that blocked every subsequent
+    // test click. Filtering before render keeps production diagnostics
+    // intact while keeping CI green.
+    expect(indexHtmlSrc).toContain('isTestHarnessNoise');
+    expect(indexHtmlSrc).toContain('stale element reference');
+    expect(indexHtmlSrc).toContain('WebDriverError');
+    expect(indexHtmlSrc).toContain('element click intercepted');
+  });
+
+  it('threaded conversation row exposes data-slot="checkbox"', () => {
+    // mark-as-read.spec.ts targets [data-slot="checkbox"] which comes
+    // from shadcn's <Checkbox> in MessageRow.svelte. The threaded view
+    // uses a custom button — without this testid, the existing test
+    // can't find the checkbox in threaded mode (the demo default).
+    expect(mailboxSrcR2).toMatch(
+      /aria-label=\{[\s\S]{0,180}'Deselect'[\s\S]{0,180}data-slot="checkbox"/,
+    );
+  });
+});
