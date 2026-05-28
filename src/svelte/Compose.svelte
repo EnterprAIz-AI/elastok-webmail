@@ -404,9 +404,13 @@
             if (decoded && isValidDecodedHtml(decoded)) {
               inner.innerHTML = DOMPurify.sanitize(decoded, { ADD_TAGS: ['style'] });
             } else {
+              // Fallback: render plain text of the decoded quote (attrs.raw is the
+              // bare base64, not an HTML string, so extractRawQuoteText can't parse it).
               inner.innerHTML = '';
               inner.textContent =
-                extractRawQuoteText((currentNode.attrs.raw as string) || '') || '';
+                decoded && typeof DOMParser !== 'undefined'
+                  ? new DOMParser().parseFromString(decoded, 'text/html').body?.textContent || ''
+                  : decoded || '';
             }
           } catch {
             inner.innerHTML = '';

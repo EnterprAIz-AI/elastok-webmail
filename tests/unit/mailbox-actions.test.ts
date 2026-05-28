@@ -308,6 +308,7 @@ import {
   addReplyPrefix,
   addForwardPrefix,
   stripQuoteCollapseMarkup,
+  getMessageBodyForReply,
   currentAccount,
   accountMenuOpen,
 } from '../../src/stores/mailboxActions.ts';
@@ -544,5 +545,34 @@ describe('reply / forward helpers', () => {
   it('stripQuoteCollapseMarkup is a no-op when no markup present', () => {
     const html = '<p>Plain body</p>';
     expect(stripQuoteCollapseMarkup(html)).toBe(html);
+  });
+
+  it('getMessageBodyForReply preserves real HTML that contains entities', async () => {
+    // A normal email body whose visible text contains ">" serializes "&gt;",
+    // and inline images use data: URIs. This must NOT be flattened to plain text.
+    const msg = { id: 'm-html', from: ['alice@example.com'] };
+    const storeBody =
+      '<div dir="ltr">Is 5 &gt; 3?<br>Yes.<br>' + '<img src="data:image/png;base64,AAAA"></div>';
+    mailboxStore.state.selectedMessage.set(msg);
+    mailboxStore.state.messageBody.set(storeBody);
+
+    const out = await getMessageBodyForReply(msg);
+    expect(out).toContain('<img');
+    expect(out).toContain('<br');
+    expect(out).toContain('<div');
+    // Regression guard: must not collapse into a tagless wall of text.
+    expect(out).not.toBe('Is 5 > 3?Yes.');
+  });
+
+  it('getMessageBodyForReply decodes genuinely double-encoded HTML', async () => {
+    const msg = { id: 'm-escaped', from: ['alice@example.com'] };
+    const storeBody = '&lt;div&gt;Hello&lt;br&gt;World&lt;/div&gt;';
+    mailboxStore.state.selectedMessage.set(msg);
+    mailboxStore.state.messageBody.set(storeBody);
+
+    const out = await getMessageBodyForReply(msg);
+    expect(out).toContain('<div>');
+    expect(out).toContain('<br>');
+    expect(out).toContain('Hello');
   });
 });

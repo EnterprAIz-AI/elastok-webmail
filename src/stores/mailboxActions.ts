@@ -523,30 +523,38 @@ export const deleteMessage = async (msg, options) => {
 const validateCachedBody = (content) => {
   if (!content || typeof content !== 'string') return '';
 
-  // Check for escaped HTML entities that indicate corrupted cache
-  // This happens when HTML was double-encoded or stored incorrectly
-  const hasEscapedHtml = /&lt;[a-zA-Z/]|&gt;|&amp;lt;|&amp;gt;/.test(content);
+  // Only "repair" content that is genuinely double-encoded — i.e. the HTML tags
+  // themselves were entity-escaped, so the body is escaped source like
+  // "&lt;div&gt;...&lt;/div&gt;" with no real tags. In that case decoding the
+  // entities recovers the original markup.
+  //
+  // We must NOT touch real HTML that merely *contains* entities. A normal email
+  // body routinely has "&gt;" (from a ">" in the visible text after HTML
+  // serialization), "&lt;email@addr&gt;", "&nbsp;", etc. Flattening such a body
+  // via textContent would strip every tag, line break, and inline image —
+  // exactly the "quoted reply collapses into a wall of text" bug.
+  const hasRealHtmlTags = /<[a-zA-Z!/]/.test(content);
+  const looksDoubleEncoded = /&lt;[a-zA-Z/!]|&amp;lt;/.test(content);
 
-  if (hasEscapedHtml) {
-    warn('[validateCachedBody] Detected escaped HTML in cached body, attempting to fix');
+  if (!hasRealHtmlTags && looksDoubleEncoded) {
+    warn('[validateCachedBody] Detected double-encoded HTML in cached body, decoding');
     try {
-      // Attempt to unescape the content
       // Use DOMParser instead of textarea.innerHTML to safely decode HTML entities
       // textarea.innerHTML is vulnerable to XSS if content contains script-like patterns
       if (typeof DOMParser !== 'undefined') {
         const doc = new DOMParser().parseFromString(content, 'text/html');
         const unescaped = doc.body?.textContent || '';
-        // Check if unescaping produced valid HTML
-        if (unescaped && !/&lt;[a-zA-Z/]|&gt;/.test(unescaped)) {
+        // Only accept the decode if it actually revealed real HTML markup
+        if (unescaped && /<[a-zA-Z!/]/.test(unescaped)) {
           return unescaped;
         }
       }
     } catch {
-      // If unescaping fails, return empty to trigger re-fetch
+      // Fall through and return the content untouched
     }
-    // Content is corrupted beyond repair, return empty to use fallback
-    warn('[validateCachedBody] Could not fix corrupted cache, using fallback');
-    return '';
+    // Could not decode into real HTML — return as-is rather than destroying it
+    warn('[validateCachedBody] Could not decode double-encoded cache, leaving as-is');
+    return content;
   }
 
   return content;
