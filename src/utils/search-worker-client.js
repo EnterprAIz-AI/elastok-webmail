@@ -1,4 +1,4 @@
-import { getDbWorker, initializeDatabase } from './db.js';
+import { getDbWorker, initializeDatabase, isDbUsingMainThread } from './db.js';
 import SearchWorker from '../workers/search.worker.ts?worker&inline';
 import { createPendingRequests } from './pending-requests.js';
 
@@ -34,6 +34,11 @@ export class SearchWorkerClient {
    * @throws {Error} If connection fails after initialization attempt
    */
   async connectToDbWorker() {
+    // When the DB runs on the main thread (WebKitGTK worker-IndexedDB fallback)
+    // there is no db worker to connect a MessageChannel to. Skip rather than
+    // throwing; search degrades gracefully on this platform.
+    if (isDbUsingMainThread()) return;
+
     let dbWorker = getDbWorker();
     if (!dbWorker) {
       try {

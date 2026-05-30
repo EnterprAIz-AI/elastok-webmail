@@ -18,6 +18,10 @@
 import DbWorker from '../workers/db.worker.ts?worker&inline';
 import { DB_NAME } from './db-constants.ts';
 import { bootstrapReady } from './bootstrap-ready.js';
+// Same Dexie engine the worker runs, importable on the main thread for the
+// fallback below (WebKitGTK stalls IndexedDB inside Web Workers).
+import { executeOperation } from './db-engine.ts';
+import { e2eTrace } from './bootstrap-ready.js'; // TEMPORARY: db-worker fallback diagnosis
 
 let worker = null;
 let messagePort = null; // For worker-to-worker communication
@@ -25,6 +29,10 @@ let requestId = 0;
 const pendingRequests = new Map();
 let initialized = false;
 let initPromise = null;
+// When true, the db worker's IndexedDB was found non-functional at init
+// (notably WebKitGTK/Linux), so every operation runs the engine on the main
+// thread instead of postMessaging the (terminated) worker.
+let useMainThread = false;
 
 // Determine if we're running in a worker context
 const isWorkerContext =
@@ -47,6 +55,11 @@ function createWorker() {
  * Send a request to the db worker and wait for response
  */
 async function send(action, table = null, payload = {}) {
+  // Main-thread fallback: the worker was torn down at init because its
+  // IndexedDB stalls (WebKitGTK). Run the same engine inline instead.
+  if (useMainThread) {
+    return executeOperation({ action, table, payload: payload || {} });
+  }
   if (!messagePort && !worker) {
     if (!isWorkerContext && action !== 'init') {
       await initDbClient();
@@ -120,39 +133,41 @@ export async function initDbClient() {
       if (import.meta.env?.DEV) {
         await bootstrapReady;
       }
-      let initTimeoutId = null;
-      const initTimeoutPromise = new Promise((_, reject) => {
-        initTimeoutId = setTimeout(() => {
-          const err = new Error('Database worker init timeout');
-          err.code = 'DB_WORKER_INIT_TIMEOUT';
-          reject(err);
-        }, 10000); // Increased timeout for dev mode
-      });
-      worker = createWorker();
-      worker.onerror = (event) => {
-        console.error('[db-worker-client] Worker error', event);
-      };
-      worker.onmessageerror = (event) => {
-        console.error('[db-worker-client] Worker message error', event);
-      };
-      worker.onmessage = handleMessage;
 
-      // Wait for db worker to initialize
-      const result = await Promise.race([
-        send('init', null, { dbName: DB_NAME }),
-        initTimeoutPromise,
-      ]);
-      if (initTimeoutId) clearTimeout(initTimeoutId);
-      if (result?.success === false) {
-        const err = new Error(result?.error || 'Database initialization failed');
-        err.code = 'DB_INIT_FAILED';
-        throw err;
+      try {
+        const result = await initViaWorker();
+        initialized = true;
+        return result;
+      } catch (workerErr) {
+        // The worker's IndexedDB is non-functional — most notably WebKitGTK on
+        // Linux, which stalls IndexedDB inside Web Workers under the tauri://
+        // scheme (init times out, or ops hang after a successful init). Tear the
+        // worker down and run the SAME Dexie engine on the main thread, which is
+        // not subject to that restriction. macOS/Windows never reach this path
+        // (the worker init + probe succeed), so they are unaffected. This also
+        // dissolves the old recovery death-spiral: initDbClient now resolves
+        // successfully via the main thread instead of repeatedly retrying a
+        // worker that can't open IndexedDB.
+        console.warn(
+          '[db-worker-client] DB worker IndexedDB unavailable; using main-thread engine:',
+          workerErr?.message,
+        );
+        e2eTrace(
+          `db: worker IndexedDB unavailable (${workerErr?.code || workerErr?.message}) -> main-thread engine`,
+        );
+        terminateDbWorker();
+        useMainThread = true;
+        const result = await executeOperation({ action: 'init', payload: { dbName: DB_NAME } });
+        if (result?.success === false) {
+          const err = new Error(result?.error || 'Main-thread database init failed');
+          err.code = 'DB_INIT_FAILED';
+          throw err;
+        }
+        initialized = true;
+        return result;
       }
-      initialized = true;
-      return result;
     } catch (error) {
       console.error('[db-worker-client] Initialization failed:', error);
-      terminateDbWorker();
       throw error;
     } finally {
       initPromise = null;
@@ -160,6 +175,78 @@ export async function initDbClient() {
   })();
 
   return initPromise;
+}
+
+/**
+ * Spin up the worker and confirm it can actually use IndexedDB. Throws if the
+ * worker fails to init OR can't round-trip a write/read/delete (the probe) —
+ * the caller then falls back to the main-thread engine.
+ */
+async function initViaWorker() {
+  let initTimeoutId = null;
+  const initTimeoutPromise = new Promise((_, reject) => {
+    initTimeoutId = setTimeout(() => {
+      const err = new Error('Database worker init timeout');
+      err.code = 'DB_WORKER_INIT_TIMEOUT';
+      reject(err);
+    }, 10000); // Increased timeout for dev mode
+  });
+  worker = createWorker();
+  worker.onerror = (event) => {
+    console.error('[db-worker-client] Worker error', event);
+  };
+  worker.onmessageerror = (event) => {
+    console.error('[db-worker-client] Worker message error', event);
+  };
+  worker.onmessage = handleMessage;
+
+  // Wait for db worker to initialize
+  const result = await Promise.race([send('init', null, { dbName: DB_NAME }), initTimeoutPromise]);
+  if (initTimeoutId) clearTimeout(initTimeoutId);
+  if (result?.success === false) {
+    const err = new Error(result?.error || 'Database initialization failed');
+    err.code = 'DB_INIT_FAILED';
+    throw err;
+  }
+
+  // init() can succeed yet later IndexedDB ops still stall under WebKitGTK, so
+  // confirm the worker can round-trip a real write/read/delete before we commit
+  // to it. On a healthy worker this resolves in well under the 3s ceiling.
+  await probeWorkerIndexedDb();
+  return result;
+}
+
+/**
+ * Write/read/delete a throwaway `meta` record through the worker. Rejects on
+ * mismatch or if the round-trip exceeds 3s (i.e. the worker's IndexedDB hangs).
+ */
+async function probeWorkerIndexedDb() {
+  const PROBE_KEY = '__db_worker_probe__';
+  let probeTimeoutId = null;
+  const probeTimeout = new Promise((_, reject) => {
+    probeTimeoutId = setTimeout(() => {
+      const err = new Error('Database worker IndexedDB probe timed out');
+      err.code = 'DB_WORKER_PROBE_TIMEOUT';
+      reject(err);
+    }, 3000);
+  });
+  const probeOps = (async () => {
+    await send('put', 'meta', { record: { key: PROBE_KEY, updatedAt: Date.now() } });
+    const got = await send('get', 'meta', { key: PROBE_KEY });
+    await send('delete', 'meta', { key: PROBE_KEY });
+    if (!got || got.key !== PROBE_KEY) {
+      const err = new Error('Database worker probe round-trip mismatch');
+      err.code = 'DB_WORKER_PROBE_FAILED';
+      throw err;
+    }
+  })();
+  // Don't leak an unhandled rejection if the timeout wins the race.
+  probeOps.catch(() => {});
+  try {
+    await Promise.race([probeOps, probeTimeout]);
+  } finally {
+    if (probeTimeoutId) clearTimeout(probeTimeoutId);
+  }
 }
 
 /**
@@ -180,6 +267,17 @@ export function connectToDbWorker(port) {
  */
 export function getDbWorker() {
   return worker;
+}
+
+/**
+ * True when the DB is running on the main thread (the worker's IndexedDB was
+ * non-functional, e.g. WebKitGTK). Other workers (search/sync) use this to skip
+ * the MessageChannel connection to the now-terminated db worker — they can't
+ * reach a main-thread DB via postMessage, so they degrade gracefully instead of
+ * throwing "db.worker not available".
+ */
+export function isDbUsingMainThread() {
+  return useMainThread;
 }
 
 /**

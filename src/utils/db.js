@@ -22,6 +22,7 @@ import {
   initDbClient,
   terminateDbWorker,
   getDbWorker,
+  isDbUsingMainThread,
   getDatabaseInfo as getDbInfo,
   clearCache as clearDbCache,
   resetDatabase as resetDb,
@@ -454,7 +455,7 @@ export async function verifyDatabaseIntegrity() {
 /**
  * Get the db worker (for setting up MessageChannels with other workers)
  */
-export { getDbWorker };
+export { getDbWorker, isDbUsingMainThread };
 
 /**
  * Terminate the database worker

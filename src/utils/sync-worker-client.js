@@ -1,7 +1,7 @@
 import { config } from '../config.js';
 import SyncWorker from '../workers/sync.worker.ts?worker&inline';
 import { Local } from './storage.js';
-import { getDbWorker, initializeDatabase } from './db.js';
+import { getDbWorker, initializeDatabase, isDbUsingMainThread } from './db.js';
 import { getAuthHeader } from './auth.ts';
 import { createPendingRequests } from './pending-requests.js';
 import { warn } from './logger.ts';
@@ -88,6 +88,11 @@ function handleWorkerError(event) {
  */
 async function connectToDbWorker() {
   if (dbConnected || !worker) return;
+
+  // When the DB runs on the main thread (WebKitGTK worker-IndexedDB fallback),
+  // there is no db worker to open a MessageChannel to. Skip the connection
+  // rather than throwing — the sync worker simply can't reach the DB here.
+  if (isDbUsingMainThread()) return;
 
   let dbWorker = getDbWorker();
   if (!dbWorker) {
