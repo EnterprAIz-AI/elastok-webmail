@@ -151,6 +151,11 @@ export async function initDbClient() {
       try {
         const result = await initViaWorker();
         initialized = true;
+        try {
+          globalThis.__feDbMode = 'worker'; // TEMPORARY: db-fallback diagnosis
+        } catch {
+          /* ignore */
+        }
         return result;
       } catch (workerErr) {
         // Defensive catch-all for any OTHER environment where the worker's
@@ -204,6 +209,11 @@ function shouldUseMainThreadDb() {
  */
 async function initMainThread() {
   useMainThread = true;
+  try {
+    globalThis.__feDbMode = 'main-thread'; // TEMPORARY: db-fallback diagnosis
+  } catch {
+    /* ignore */
+  }
   const result = await executeOperation({ action: 'init', payload: { dbName: DB_NAME } });
   if (result?.success === false) {
     const err = new Error(result?.error || 'Main-thread database init failed');

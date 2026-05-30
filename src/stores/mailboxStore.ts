@@ -2363,6 +2363,9 @@ const createMailboxStore = () => {
         .toArray();
       const unreadMessages = allFolderMessages.filter((m) => m.is_unread === true);
 
+      e2eTrace(
+        `markFolderAsRead folder=${folderPath} dbMode=${(globalThis as Record<string, unknown>).__feDbMode} inDb=${allFolderMessages.length} unread=${unreadMessages.length}`,
+      );
       if (!unreadMessages.length) {
         return { success: true, count: 0 };
       }
