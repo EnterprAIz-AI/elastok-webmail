@@ -1266,7 +1266,13 @@
             onclick={async (e) => {
               if (!isTauriDesktop) return;
               e.preventDefault();
-              const files = await pickFiles({ accept: '.vcf,text/vcard' });
+              const files = await pickFiles({ accept: '.vcf,text/vcard' }).catch((err) => {
+                // The native macOS picker can return nil (see file-picker.ts);
+                // surface a clean message instead of an unhandled rejection.
+                error = 'Could not open the file picker — a known macOS issue we are working on.';
+                console.error('[contacts] vCard picker failed', err);
+                return null;
+              });
               if (files) importVCard(files);
             }}
           >
@@ -1393,7 +1399,12 @@
               onclick={async (e) => {
                 if (!isTauriDesktop) return;
                 e.preventDefault();
-                const files = await pickFiles({ accept: 'image/*' });
+                const files = await pickFiles({ accept: 'image/*' }).catch((err) => {
+                  error =
+                    'Could not open the image picker — a known macOS issue we are working on.';
+                  console.error('[contacts] photo picker failed', err);
+                  return null;
+                });
                 if (files) handlePhotoSelect(files);
               }}
             >

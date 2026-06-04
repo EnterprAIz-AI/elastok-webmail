@@ -3991,7 +3991,18 @@
             </DropdownMenu.Item>
             <DropdownMenu.Item
               onclick={async () => {
-                const files = await pickFiles({ accept: '.ics,text/calendar' });
+                const files = await pickFiles({ accept: '.ics,text/calendar' }).catch((err) => {
+                  // The native macOS picker can return nil (see file-picker.ts).
+                  // Surface a toast and do NOT fall through to the HTML <input>
+                  // below — on Tauri that can SIGABRT the WKWebView the same way.
+                  toasts?.show?.(
+                    'Could not open the file picker — a known macOS issue we are working on.',
+                    'error',
+                  );
+                  console.error('[calendar] ICS picker failed', err);
+                  return 'picker-error' as const;
+                });
+                if (files === 'picker-error') return;
                 if (files) {
                   importICS(files);
                   return;
