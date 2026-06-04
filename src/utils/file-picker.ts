@@ -12,44 +12,31 @@
 
 import { isTauriDesktop } from './platform.js';
 
-// macOS 26 (Tahoe) crashes the bundled tauri-plugin-dialog file picker:
-// rfd 0.16's NSOpenPanel binding is non-nullable, but +openPanel started
-// returning nil on Tahoe and the objc2 retain assertion panics → SIGABRT.
-// Detect macOS and route through our custom Rust command instead, which
-// uses msg_send! with a nullable return type and an alloc/init fallback.
+// The bundled tauri-plugin-dialog file picker uses rfd 0.16, whose
+// NSOpenPanel/NSSavePanel bindings are NON-nullable: rfd calls
+// `+[NSOpenPanel openPanel]` and asserts the result is non-nil, so the
+// instant macOS hands back nil, objc2's retain assertion panics → SIGABRT
+// (the whole app aborts, taking any open compose draft with it).
+//
+// `+openPanel` returning nil is NOT tied to one arch or OS version. We have
+// confirmed the identical rfd → NSOpenPanel → none_fail SIGABRT on both
+// Apple Silicon Tahoe AND Intel Sonoma 14.7.3 (0.11.6 crash report). The
+// 2026-06-02 fix (removing the app-sandbox entitlement) eliminated the most
+// common nil cause but not all of them — that Intel Sonoma report had the
+// sandbox already gone, and its kernel triage showed the OS failing a VM
+// allocation under memory pressure while constructing the panel. The OS can
+// return nil for reasons we don't control, and the non-nullable plugin path
+// SIGABRTs every single time it does.
+//
+// So on macOS we NEVER use the plugin's open/save panel. We route through our
+// own `pick_files_macos` / `save_file_macos` commands (file_picker_macos.rs,
+// download.ts), which build the panel with a nullable `msg_send!` and degrade
+// to a graceful error instead of aborting when the OS returns nil. Non-macOS
+// desktop keeps the plugin — rfd's nil-panic is macOS-specific.
 const isMacOS =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || '');
 
 export const isMacOSPlatform = isMacOS;
-
-/**
- * The ONE combination where the bundled plugin dialog's rfd path SIGABRTs on the
- * NSOpenPanel nil-return: Apple Silicon (aarch64) macOS 26 "Tahoe" or later.
- * That's the only place we must use our custom `pick_files_macos` command (which
- * trades the SIGABRT for a graceful nil).
- *
- * Everywhere else the plugin dialog is the working, crash-free path, so we use
- * it directly:
- *   - Intel (x86_64, any version): plugin works; our custom command instead
- *     returns nil (seen on Intel Sonoma 14.7.3 AND Intel Tahoe) and its
- *     `app.activate()` blanks the compose window — so never call it there.
- *   - Apple Silicon BEFORE Tahoe (Sonoma/Sequoia): plugin works as it always
- *     has — routing these to the custom command would be a new regression.
- *
- * UA is frozen at "10_15_7", so read arch/version via plugin-os. `major >= 25`
- * covers Tahoe under product (26) or Darwin (25) numbering. On detection
- * failure, assume this combo so we never risk the rfd SIGABRT.
- */
-async function isAppleSiliconTahoe(): Promise<boolean> {
-  try {
-    const { version, arch } = await import('@tauri-apps/plugin-os');
-    if (arch() !== 'aarch64') return false;
-    const major = parseInt(String(version()).split('.')[0], 10);
-    return !Number.isFinite(major) || major >= 25;
-  } catch {
-    return true;
-  }
-}
 
 /**
  * Pick files using Tauri's native dialog on desktop.
@@ -67,12 +54,11 @@ export async function pickFiles({
   const { readFile } = await import('@tauri-apps/plugin-fs');
 
   let paths: string[];
-  if (isMacOS && (await isAppleSiliconTahoe())) {
-    // Apple Silicon Tahoe ONLY: the plugin's rfd path SIGABRTs on the
-    // NSOpenPanel nil-return, so go through our nullable custom command. It may
-    // itself return nil (no panel constructible) — surface a typed error the
-    // caller handles instead of letting the raw native string become an
-    // unhandled rejection.
+  if (isMacOS) {
+    // All macOS: go through our nullable custom command so a nil panel from the
+    // OS becomes a graceful, typed error instead of the plugin's rfd SIGABRT.
+    // This mirrors the save path in download.ts. The custom command does not
+    // apply native type filters (`accept`); callers validate selected files.
     const { invoke } = await import('@tauri-apps/api/core');
     try {
       const result = await invoke<string[]>('pick_files_macos', { multiple });
@@ -85,10 +71,8 @@ export async function pickFiles({
       throw e;
     }
   } else {
-    // Everything else — Intel macOS (any version), Apple Silicon before Tahoe,
-    // and all other desktop platforms: the bundled plugin dialog is the working,
-    // crash-free path. On Intel the custom command returns nil and its
-    // app.activate() blanks the compose window, so we deliberately don't call it.
+    // Non-macOS desktop (Windows/Linux): the bundled plugin dialog is the
+    // working, crash-free path — rfd's NSOpenPanel nil-panic is macOS-specific.
     const { open } = await import('@tauri-apps/plugin-dialog');
     const selected = await open({ multiple, filters: buildFilters(accept) });
     if (!selected) return null;
