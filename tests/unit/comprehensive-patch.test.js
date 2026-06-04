@@ -1444,10 +1444,14 @@ describe('round-2 fix regression guards', () => {
     expect(dropBody).toContain('selectedMessage?.set?.(null);');
   });
 
-  it('drag-hover folder expand uses a 2500ms delay', () => {
-    // Bumped from 1500ms because folder-tree shift mid-drag pushed the
-    // intended drop target off-screen even at 1.5s.
-    expect(mailboxSrcR2).toMatch(/toggleFolderExpansion\(folder\.path\);\s*\}\s*,\s*2500\)/);
+  it('does not spring-load (auto-expand) folders mid-drag', () => {
+    // 2a76e57 deliberately removed the drag-hover spring-load timer: expanding
+    // a folder mid-drag shifts the tree and pulls the intended drop target out
+    // from under the cursor. (Earlier this guarded a 1500→2500ms delay; that
+    // approach was abandoned.) Guard against re-introducing the timer — note
+    // toggleFolderExpansion itself still exists for the manual chevron onclick.
+    expect(mailboxSrcR2).not.toContain('dragExpandTimeout');
+    expect(mailboxSrcR2).not.toMatch(/setTimeout\([\s\S]{0,80}toggleFolderExpansion/);
   });
 
   it('row click dispatches through handleRowClick with modifier handling', () => {
