@@ -2488,7 +2488,11 @@
 
   const toggleSelection = (item, event) => {
     if (event) event.stopPropagation?.();
-    selectionMode = true;
+    // Don't force checkbox ("selection") mode here: cmd/ctrl- and shift-click
+    // highlight rows and enable the bulk-action bar without showing checkboxes.
+    // Checkbox mode is entered only via the explicit toolbar toggle
+    // (selectAllVisible). Selection highlight + the action bar are both driven
+    // by selectedConversationIds, independent of selectionMode.
     if (mailboxStore?.actions?.toggleConversationSelection) {
       mailboxStore.actions.toggleConversationSelection(item);
     }
@@ -2520,7 +2524,8 @@
       if (anchorIdx >= 0 && targetIdx >= 0) {
         const [lo, hi] = anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx];
         const rangeIds = ids.slice(lo, hi + 1);
-        selectionMode = true;
+        // Shift-click range select highlights without entering checkbox mode
+        // (see toggleSelection) — reserved for the explicit toolbar toggle.
         mailboxStore?.actions?.setSelectedIds?.(rangeIds);
         return;
       }
@@ -9258,10 +9263,11 @@
     z-index: 10;
   }
 
-  /* Make folders slightly larger drop targets during drag */
-  :global(body.dragging) ul.space-y-0\.5 > li {
-    min-height: 44px;
-  }
+  /* No min-height growth during drag. Forcing every folder row to 44px while
+     body.dragging was set pushed the whole tree downward the instant a drag
+     started — shifting the user's intended drop target out from under the
+     cursor (the same disorientation the removed spring-load expand caused).
+     The default ~36px rows are an ample mouse drop target on desktop. */
 
   /* Prevent text selection during drag */
   :global(body.dragging) {

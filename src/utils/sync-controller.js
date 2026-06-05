@@ -49,9 +49,13 @@ export const syncSummary = derived([status, progressMap], ([$status, $progress])
 let queue = [];
 let inFlight = false;
 let currentAccount = null;
-// Consecutive zero-progress backfill batches seen — used to cap the backfill
-// re-queue loop (see nextBackfillDecision). Reset on progress, done, or error.
-let backfillNoProgressStreak = 0;
+// Consecutive zero-progress backfill batches seen, PER FOLDER — used to cap the
+// backfill re-queue loop (see nextBackfillDecision). Reset on progress, done, or
+// error. This must be per-folder: a single shared counter let one folder's
+// exhausted (empty) batches stop a different folder's backfill mid-history, so
+// historical backfill effectively only completed for the Inbox. Keyed by folder
+// path; entries are dropped when a folder finishes (no requeue).
+const backfillNoProgressStreakByFolder = new Map();
 const queuedKeys = new Set();
 const buildQueueKey = (task) => `${task.type}:${task.folder}`;
 const pushTask = (task) => {
@@ -155,7 +159,7 @@ async function runTask(task) {
       // Backfill is best-effort. On error, don't loop — let the next
       // metadata sync (folder switch, manual refresh) re-trigger it.
       warn('[sync-controller] backfill task failed', err);
-      backfillNoProgressStreak = 0;
+      backfillNoProgressStreakByFolder.delete(task.folder);
       return;
     }
     // Re-queue the next batch only while the worker reports !done AND batches
@@ -163,14 +167,18 @@ async function runTask(task) {
     // batches so a misbehaving worker can't spin the queue forever. The append
     // (pushTask) ensures any user-triggered work queued during this batch runs
     // first.
-    const decision = nextBackfillDecision(result, backfillNoProgressStreak);
-    backfillNoProgressStreak = decision.noProgressStreak;
+    const folderStreak = backfillNoProgressStreakByFolder.get(task.folder) || 0;
+    const decision = nextBackfillDecision(result, folderStreak);
     if (decision.requeue) {
+      backfillNoProgressStreakByFolder.set(task.folder, decision.noProgressStreak);
       pushTask({
         type: 'backfill',
         folder: task.folder,
         pageSize: task.pageSize || settings.pageSize || 50,
       });
+    } else {
+      // Folder finished (done or capped) — drop its counter so it doesn't leak.
+      backfillNoProgressStreakByFolder.delete(task.folder);
     }
   } else if (task.type === 'bodies') {
     await sendSyncTask(

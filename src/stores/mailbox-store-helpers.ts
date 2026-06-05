@@ -95,6 +95,42 @@ export const mergeMessagePages = (existing = [], incoming = [], max = 0) => {
   return merged;
 };
 
+// Decide whether infinite scroll should keep paging after a message-list page
+// fetch resolves. Two independent "more exists" signals:
+//   - the fetched page looked full (worker reports hasNextPage, or the
+//     main-thread page returned a full `limit` of items), and
+//   - the folder's server-reported total exceeds what we've paged so far.
+// Either keeps scroll alive. Crucially we also OR in `serverTotal`, because the
+// per-source signal is bounded by what's been synced — a folder with hundreds
+// of messages whose first server page comes back short (e.g. 47 of a 50 limit)
+// would otherwise set hasNextPage=false and strand the rest. (This mirrors the
+// cache-read path's hasMorePages() check; without it the post-fetch overwrote
+// that optimism back to false — the "stuck at ~47" desktop bug.)
+//
+// The empty-page guard wins over everything: a page that returns zero items is
+// the real end of the folder, so we stop even if a stale-high serverTotal still
+// looks like there's more — otherwise scroll spins forever on empty fetches.
+export const resolveHasMoreAfterFetch = ({
+  source,
+  workerHasNextPage,
+  listLength,
+  limit,
+  page,
+  serverTotal,
+}: {
+  source: string;
+  workerHasNextPage?: unknown;
+  listLength: number;
+  limit: number;
+  page: number;
+  serverTotal?: number | null;
+}): boolean => {
+  if (!listLength) return false;
+  const fetchedFullPage = source === 'worker' ? Boolean(workerHasNextPage) : listLength >= limit;
+  const serverHasMore = Number.isFinite(serverTotal) && (serverTotal as number) > page * limit;
+  return fetchedFullPage || serverHasMore;
+};
+
 // Reads cached message records by compound key ([account, id] or alternate
 // identifiers). Injected so these backfills can be unit-tested without Dexie;
 // in the store it's wired to `db.messages.bulkGet`.

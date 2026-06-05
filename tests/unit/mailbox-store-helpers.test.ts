@@ -7,6 +7,7 @@ import {
   mergeMessagePages,
   mergeMissingLabels,
   mergeMissingFrom,
+  resolveHasMoreAfterFetch,
 } from '../../src/stores/mailbox-store-helpers';
 
 // Mock bulkGet: returns the cached record for each [account, key] tuple in the
@@ -264,5 +265,96 @@ describe('mergeMissingFrom', () => {
     const list = [{ id: '1', from: '' }];
     const out = await mergeMissingFrom(bulkGet, 'acct', list);
     expect(out).toBe(list);
+  });
+});
+
+describe('resolveHasMoreAfterFetch', () => {
+  it('stops when the fetched page is empty (real end), even if serverTotal looks high', () => {
+    // Empty-page guard wins — otherwise a stale-high serverTotal spins scroll
+    // on endless empty fetches.
+    expect(
+      resolveHasMoreAfterFetch({
+        source: 'worker',
+        workerHasNextPage: true,
+        listLength: 0,
+        limit: 50,
+        page: 3,
+        serverTotal: 999,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps paging on a short first page when the server total has more (the ~47 bug)', () => {
+    // 47 of a 50 limit would set hasNextPage=false on the per-source signal
+    // alone; serverTotal=300 keeps scroll alive so the rest of the folder loads.
+    expect(
+      resolveHasMoreAfterFetch({
+        source: 'worker',
+        workerHasNextPage: false,
+        listLength: 47,
+        limit: 50,
+        page: 1,
+        serverTotal: 300,
+      }),
+    ).toBe(true);
+  });
+
+  it('stops on a short page when the server total agrees there is no more', () => {
+    expect(
+      resolveHasMoreAfterFetch({
+        source: 'worker',
+        workerHasNextPage: false,
+        listLength: 47,
+        limit: 50,
+        page: 1,
+        serverTotal: 47,
+      }),
+    ).toBe(false);
+  });
+
+  it('honors the per-source full-page signal when serverTotal is unknown', () => {
+    // worker source: trust res.hasNextPage
+    expect(
+      resolveHasMoreAfterFetch({
+        source: 'worker',
+        workerHasNextPage: true,
+        listLength: 50,
+        limit: 50,
+        page: 1,
+        serverTotal: null,
+      }),
+    ).toBe(true);
+    // main source: a full page (length >= limit) implies more
+    expect(
+      resolveHasMoreAfterFetch({
+        source: 'main',
+        listLength: 50,
+        limit: 50,
+        page: 1,
+        serverTotal: null,
+      }),
+    ).toBe(true);
+    // main source: a short page with no serverTotal stops
+    expect(
+      resolveHasMoreAfterFetch({
+        source: 'main',
+        listLength: 12,
+        limit: 50,
+        page: 1,
+        serverTotal: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps paging mid-folder on a full page regardless of serverTotal', () => {
+    expect(
+      resolveHasMoreAfterFetch({
+        source: 'main',
+        listLength: 50,
+        limit: 50,
+        page: 2,
+        serverTotal: 80,
+      }),
+    ).toBe(true);
   });
 });

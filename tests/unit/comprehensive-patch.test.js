@@ -1468,6 +1468,34 @@ describe('round-2 fix regression guards', () => {
     expect(mailboxSrcR2).toContain('handleRowClick(msg, e, $filteredMessages || []');
   });
 
+  it('modifier select highlights without forcing checkbox (selection) mode', () => {
+    // cmd/ctrl/shift selection must NOT flip selectionMode — that would force
+    // the per-row checkboxes on. Checkbox mode is entered only via the explicit
+    // toolbar toggle (selectAllVisible). Highlight + the bulk-action bar are
+    // driven by selectedConversationIds, so they work without checkbox mode.
+    const toggleStart = mailboxSrcR2.indexOf('const toggleSelection = (item, event) =>');
+    const toggleEnd = mailboxSrcR2.indexOf('const handleRowClick', toggleStart);
+    const toggleBody = mailboxSrcR2.slice(toggleStart, toggleEnd);
+    expect(toggleBody).not.toContain('selectionMode = true');
+
+    // The shift+click range branch must likewise not enter checkbox mode.
+    const rangeStart = mailboxSrcR2.indexOf('const rangeIds = ids.slice(lo, hi + 1);');
+    const rangeBody = mailboxSrcR2.slice(rangeStart, rangeStart + 200);
+    expect(rangeBody).not.toContain('selectionMode = true');
+
+    // Only the explicit toolbar toggle enters checkbox mode.
+    expect(mailboxSrcR2).toMatch(/if \(!selectionMode\) \{\s*selectionMode = true;/);
+    // Per-row checkboxes stay gated on selectionMode (card view).
+    expect(mailboxSrcR2).toContain('{#if !cardView || selectionMode}');
+  });
+
+  it('does not grow folder rows (min-height) during drag', () => {
+    // Forcing every folder <li> to 44px while body.dragging shifted the whole
+    // tree downward on drag-start, moving the intended drop target. Guard
+    // against re-introducing the rule.
+    expect(mailboxSrcR2).not.toMatch(/body\.dragging\)[^}]*min-height:\s*44px/);
+  });
+
   it('dark theme surface tokens are at hue 0 with 0% saturation', () => {
     // Previous palette held hue 240 at 4-6% sat. Pure grey (0 0% L%)
     // removes the blue cast at full-window scale. Accent (199°) retained.
