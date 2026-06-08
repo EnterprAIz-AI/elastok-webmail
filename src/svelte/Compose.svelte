@@ -1757,6 +1757,23 @@
           editorView?.commands.insertContent(converted);
           return true;
         },
+        // Drag-and-drop onto the editor: the editor is a contenteditable, and
+        // WebKit's native behavior for a dropped image is to insert it inline at
+        // full size (it fills the compose window). Claim file drops here and
+        // route them to the attachment tray via the same path the picker uses.
+        // Returning true makes ProseMirror preventDefault (no inline insert);
+        // stopPropagation keeps the root onComposeDrop from re-adding the file.
+        handleDrop: (view, event) => {
+          const files = event.dataTransfer?.files;
+          if (files && files.length > 0) {
+            event.stopPropagation();
+            isDraggingFile = false;
+            dragDepth = 0;
+            void processSelectedFiles(files);
+            return true;
+          }
+          return false; // text / internal editor drags: let ProseMirror handle
+        },
       },
       content: body || '',
       onUpdate: ({ editor }) => {
@@ -1945,6 +1962,60 @@
     if (!file) return;
     processSelectedImage(file);
     target.value = '';
+  };
+
+  // --- Drag-and-drop attachments -------------------------------------------
+  // On macOS the native file picker can be unavailable (NSOpenPanel returns nil
+  // → the bundled rfd plugin SIGABRTs, our nullable command throws), and on
+  // Apple-Silicon-Tahoe there is currently NO working native picker at all.
+  // Drag-and-drop is the durable way to attach files there. The desktop window
+  // sets `dragDropEnabled: false` (src-tauri/tauri.conf.json), so the WebView
+  // delivers native HTML5 drag events with real File objects straight to the
+  // page — we funnel dropped files through the same processSelectedFiles path
+  // the picker uses. Drops onto the editor body are claimed by the editor's
+  // handleDrop (in initEditor) so WebKit can't insert the image inline; these
+  // root handlers cover the rest of the compose surface (header, recipients,
+  // attachment tray) and drive the drag overlay. We react only to file drags.
+  let isDraggingFile = $state(false);
+  // Counts dragenter/dragleave across nested children so the overlay doesn't
+  // flicker as the cursor crosses descendant boundaries (both events bubble to
+  // the root listener); the overlay is visible while depth > 0.
+  let dragDepth = 0;
+
+  const dragHasFiles = (event: DragEvent) =>
+    Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+  const onComposeDragEnter = (event: DragEvent) => {
+    if (!dragHasFiles(event)) return;
+    event.preventDefault();
+    dragDepth += 1;
+    isDraggingFile = true;
+  };
+
+  const onComposeDragOver = (event: DragEvent) => {
+    if (!dragHasFiles(event)) return;
+    // Must preventDefault on dragover or the drop never fires — and the WebView
+    // would navigate to the dropped file, destroying the open draft.
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  };
+
+  const onComposeDragLeave = (event: DragEvent) => {
+    if (!isDraggingFile) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) isDraggingFile = false;
+  };
+
+  const onComposeDrop = async (event: DragEvent) => {
+    // Always clear the overlay on any drop so it can't get stuck visible. Read
+    // the live files list rather than dataTransfer.types — some WebKit builds
+    // report types inconsistently on the drop event.
+    dragDepth = 0;
+    isDraggingFile = false;
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    event.preventDefault();
+    await processSelectedFiles(files);
   };
 
   const removeAttachment = (att: unknown) => {
@@ -2751,7 +2822,7 @@
     {/if}
     <div
       class={nativeWindow
-        ? 'flex flex-col bg-background w-full h-screen overflow-hidden'
+        ? 'relative flex flex-col bg-background w-full h-screen overflow-hidden'
         : 'fixed inset-0 z-50 flex flex-col bg-background border border-border shadow-2xl ring-1 ring-black/5 dark:ring-white/10 overflow-hidden transition-all'}
       class:md:inset-auto={!nativeWindow && !expanded}
       class:md:bottom-4={!nativeWindow && !expanded}
@@ -2773,7 +2844,20 @@
       role="dialog"
       aria-modal={!compact && !nativeWindow}
       data-testid="compose-modal"
+      ondragenter={onComposeDragEnter}
+      ondragover={onComposeDragOver}
+      ondragleave={onComposeDragLeave}
+      ondrop={onComposeDrop}
     >
+      {#if isDraggingFile}
+        <div
+          class="pointer-events-none absolute inset-0 z-[60] flex flex-col items-center justify-center gap-3 bg-primary/10 backdrop-blur-sm border-2 border-dashed border-primary"
+          data-testid="compose-drop-overlay"
+        >
+          <Paperclip class="h-10 w-10 text-primary" />
+          <p class="text-base font-medium text-primary">Drop files to attach</p>
+        </div>
+      {/if}
       <header
         class="flex h-14 items-center justify-between gap-3 px-4 bg-muted/30"
         style="padding-top: env(safe-area-inset-top, 0px); box-sizing: content-box;"

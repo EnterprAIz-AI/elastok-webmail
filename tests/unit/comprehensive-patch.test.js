@@ -1536,4 +1536,48 @@ describe('round-2 fix regression guards', () => {
       /aria-label=\{[\s\S]{0,180}'Deselect'[\s\S]{0,180}data-slot="checkbox"/,
     );
   });
+
+  describe('Compose drag-and-drop attachments (Apple-Silicon-Tahoe durable fix)', () => {
+    const composeSrc = fs.readFileSync(
+      path.resolve(__dirname, '../../src/svelte/Compose.svelte'),
+      'utf8',
+    );
+
+    it('wires file drag/drop handlers on the compose root', () => {
+      // The native macOS picker has no working path on Apple-Silicon-Tahoe
+      // (rfd SIGABRTs, the nullable command returns nil) — drag-and-drop is the
+      // only durable way to attach there. Root must handle dragover + drop.
+      expect(composeSrc).toContain('ondragover={onComposeDragOver}');
+      expect(composeSrc).toContain('ondrop={onComposeDrop}');
+    });
+
+    it('drop funnels dropped files through the same processSelectedFiles path as the picker', () => {
+      expect(composeSrc).toMatch(
+        /const onComposeDrop[\s\S]{0,400}dataTransfer\?\.files[\s\S]{0,120}processSelectedFiles\(files\)/,
+      );
+    });
+
+    it('claims file drops on the editor so WebKit cannot insert the image inline', () => {
+      // The editor is a contenteditable; without an editorProps.handleDrop that
+      // claims file drops, WebKit inserts a dropped image inline at full size
+      // (it fills the compose window) instead of adding an attachment chip.
+      expect(composeSrc).toMatch(
+        /handleDrop:[\s\S]{0,400}dataTransfer\?\.files[\s\S]{0,200}processSelectedFiles\(files\)[\s\S]{0,80}return true/,
+      );
+      // stopPropagation prevents the root onComposeDrop from re-adding the file.
+      expect(composeSrc).toMatch(/handleDrop:[\s\S]{0,300}stopPropagation\(\)/);
+    });
+
+    it('reacts only to drags carrying files so editor text/HTML drags are untouched', () => {
+      expect(composeSrc).toMatch(/dragHasFiles[\s\S]{0,120}includes\('Files'\)/);
+      // dragover must preventDefault or the drop never fires (and the WebView
+      // navigates to the file, destroying the draft).
+      expect(composeSrc).toMatch(/onComposeDragOver[\s\S]{0,400}event\.preventDefault\(\)/);
+    });
+
+    it('shows a drop overlay while a file drag is in progress', () => {
+      expect(composeSrc).toContain('data-testid="compose-drop-overlay"');
+      expect(composeSrc).toContain('{#if isDraggingFile}');
+    });
+  });
 });
