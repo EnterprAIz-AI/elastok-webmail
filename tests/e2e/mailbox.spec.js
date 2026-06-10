@@ -209,13 +209,16 @@ test.describe('Mailbox — folder navigation', () => {
   });
 
   test('shows all expected folders', async ({ page }) => {
-    await expect(page.getByRole('button', { name: /Inbox/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Archive/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Trash/ })).toBeVisible();
+    // Scope to the folder sidebar: the mobile bottom tab bar also has an
+    // "Inbox" button, which would otherwise make /Inbox/ ambiguous.
+    const folders = page.locator('.fe-folders');
+    await expect(folders.getByRole('button', { name: /Inbox/ })).toBeVisible();
+    await expect(folders.getByRole('button', { name: /Archive/ })).toBeVisible();
+    await expect(folders.getByRole('button', { name: /Trash/ })).toBeVisible();
   });
 
   test('inbox shows unread count badge', async ({ page }) => {
-    const inboxBtn = page.getByRole('button', { name: /Inbox/ }).first();
+    const inboxBtn = page.locator('.fe-folders').getByRole('button', { name: /Inbox/ }).first();
     await expect(inboxBtn).toBeVisible();
     await expect(inboxBtn).toContainText(/\d+/);
   });
