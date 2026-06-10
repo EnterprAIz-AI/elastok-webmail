@@ -94,6 +94,12 @@ jobs:
       - name: Format
         run: pnpm format
 
+      # Svelte check (typecheck) is intentionally NOT gated yet: `pnpm check`
+      # currently reports ~2050 pre-existing errors (mostly missing .d.ts for
+      # .js modules + implicit-any in workers). Enabling it as-is would turn CI
+      # permanently red. Burning that backlog down to zero (or wiring a
+      # baseline ratchet that only fails on NEW errors) is tracked separately;
+      # do not simply uncomment this without doing that first.
       # - name: Svelte check
       #   run: pnpm check
 

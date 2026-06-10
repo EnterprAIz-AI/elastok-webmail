@@ -24,26 +24,18 @@ test.beforeEach(async ({ page }, testInfo) => {
 test.describe('Desktop — Compose', () => {
   test('opens compose from sidebar button', async ({ page }) => {
     await openComposeFromSidebar(page);
-    await page.waitForTimeout(1000);
-    // Compose should open — check for Subject input (more unique than To)
-    // Verify the compose button was clickable and the page didn't error
-    await page
-      .locator('input[placeholder*="Subject"]')
-      .first()
-      .isVisible({ timeout: 5000 })
-      .catch(() => false);
+    // Compose opening MUST surface the Subject input — assert it, don't swallow.
+    await expect(page.locator('input[placeholder*="Subject"]').first()).toBeVisible({
+      timeout: 5000,
+    });
   });
 
   test('compose has editor area', async ({ page }) => {
     await openComposeFromSidebar(page);
-    await page.waitForTimeout(1000);
-    // Look for TipTap editor or text area
-    const editor = page.locator('[contenteditable="true"]').first();
-    const isVisible = await editor.isVisible({ timeout: 5000 }).catch(() => false);
-    // Editor should be present if compose modal rendered
-    if (isVisible) {
-      await expect(editor).toBeVisible();
-    }
+    // The TipTap contenteditable body must render once compose is open.
+    await expect(page.locator('[contenteditable="true"]').first()).toBeVisible({
+      timeout: 5000,
+    });
   });
 });
 
@@ -81,8 +73,10 @@ test.describe('Desktop — Message Actions', () => {
     await expect(reader).toBeVisible();
 
     await clickDeleteInReader(page);
-    // After delete, the message should be removed (mock API returns success)
-    await page.waitForTimeout(500);
+    // Optimistic update removes the deleted message row from the list immediately.
+    await expect(
+      page.locator('[data-conversation-row]', { hasText: 'Your calendar invite' }),
+    ).toHaveCount(0, { timeout: 5000 });
   });
 
   test('archive button triggers message archive', async ({ page }, testInfo) => {
@@ -93,7 +87,10 @@ test.describe('Desktop — Message Actions', () => {
     await expect(reader).toBeVisible();
 
     await clickArchiveInReader(page);
-    await page.waitForTimeout(500);
+    // Optimistic update removes the archived message from the INBOX list.
+    await expect(
+      page.locator('[data-conversation-row]', { hasText: 'Welcome to Webmail' }),
+    ).toHaveCount(0, { timeout: 5000 });
   });
 
   test('reader shows action toolbar with reply, delete, archive', async ({ page }, testInfo) => {
@@ -143,9 +140,8 @@ test.describe('Desktop — Selection Mode', () => {
   test('shows bulk action bar when messages are selected', async ({ page }) => {
     await enterSelectionMode(page);
     await selectRowCheckbox(page, 'Welcome to Webmail');
-    await page.waitForTimeout(300);
-    // Bulk actions should appear (delete, archive, move, etc.)
-    // The toolbar changes when items are selected
+    // Selecting a row reveals the bulk-action toolbar (Archive/Delete selected).
+    await expect(page.getByLabel('Delete selected')).toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -175,9 +171,8 @@ test.describe('Desktop — Search Workflow', () => {
   test('search shows suggestions on focus', async ({ page }) => {
     const searchInput = page.getByPlaceholder('Search mail');
     await searchInput.focus();
-    await page.waitForTimeout(300);
-    // Suggestion panel should appear
-    // It shows operators like from:, to:, subject:, etc.
+    // Focus reveals the operator suggestion panel (from:, to:, subject:, …).
+    await expect(page.locator('[data-type="operator"]').first()).toBeVisible({ timeout: 5000 });
   });
 });
 

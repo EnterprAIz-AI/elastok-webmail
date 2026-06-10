@@ -137,16 +137,56 @@ jobs:
       release_gate: true
     secrets: inherit
 
+  # ── 1c. CI gate (lint + format + unit + build) ─────────────────────────
+  # A release is triggered by a tag push, which does NOT re-run ci.yml's
+  # lint/format/unit checks on the tagged commit (ci.yml skips
+  # `chore(release):` commits to avoid duplicate runs). e2e-webview covers
+  # the frontend e2e but not these, so without this job a tag could ship code
+  # that fails lint or unit tests. Re-run them here and gate the builds on it.
+  # (svelte-check is intentionally omitted — it has a large pre-existing error
+  # backlog tracked separately; see ci.yml.)
+  ci-gate:
+    needs: create-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+        with:
+          run_install: false
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION || '22' }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Format
+        run: pnpm format
+      - name: Unit tests
+        run: pnpm test -- --run
+      - name: Build
+        run: pnpm build
+
   # ── 2. Build Desktop (Tauri) ────────────────────────────────────────────
   build-desktop:
-    needs: [create-release, e2e-webview]
+    needs: [create-release, e2e-webview, ci-gate]
     # Explicit gate so a skipped/failed upstream surfaces in the run UI with
     # a named cause (e.g. "needs.e2e-webview.result == 'success' was false")
     # instead of an unexplained "skipped" — same effective behavior as the
     # implicit default of `needs:`, but diagnosable at a glance.
     if: ${{ !cancelled()
       && needs.create-release.result == 'success'
-      && needs.e2e-webview.result == 'success' }}
+      && needs.e2e-webview.result == 'success'
+      && needs.ci-gate.result == 'success' }}
     uses: ./.github/workflows/release-desktop.yml
     with:
       version: ${{ needs.create-release.outputs.version }}
@@ -163,11 +203,12 @@ jobs:
   # and skips gracefully when signing secrets aren't configured, so this
   # never blocks the release when provisioning isn't ready.
   build-mobile:
-    needs: [create-release, e2e-webview]
+    needs: [create-release, e2e-webview, ci-gate]
     # See build-desktop above — explicit for visibility in the run UI.
     if: ${{ !cancelled()
       && needs.create-release.result == 'success'
-      && needs.e2e-webview.result == 'success' }}
+      && needs.e2e-webview.result == 'success'
+      && needs.ci-gate.result == 'success' }}
     uses: ./.github/workflows/release-mobile.yml
     with:
       version: ${{ needs.create-release.outputs.version }}
@@ -445,6 +486,7 @@ jobs:
     needs:
       - create-release
       - e2e-webview
+      - ci-gate
       - build-desktop
       - build-mobile
       - checksums
@@ -457,6 +499,7 @@ jobs:
         env:
           CREATE: ${{ needs.create-release.result }}
           E2E: ${{ needs.e2e-webview.result }}
+          GATE: ${{ needs.ci-gate.result }}
           DESK: ${{ needs.build-desktop.result }}
           MOBILE: ${{ needs.build-mobile.result }}
           SUMS: ${{ needs.checksums.result }}
@@ -471,6 +514,7 @@ jobs:
             echo "| --- | --- |"
             echo "| create-release | \`$CREATE\` |"
             echo "| e2e-webview    | \`$E2E\` |"
+            echo "| ci-gate        | \`$GATE\` |"
             echo "| build-desktop  | \`$DESK\` |"
             echo "| build-mobile   | \`$MOBILE\` |"
             echo "| checksums      | \`$SUMS\` |"
@@ -484,6 +528,7 @@ jobs:
           for pair in \
               "create-release:$CREATE" \
               "e2e-webview:$E2E" \
+              "ci-gate:$GATE" \
               "build-desktop:$DESK" \
               "deploy:$DEPLOY"; do
             name="${pair%%:*}"
