@@ -59,6 +59,12 @@ tauri-plugin-webdriver = { version = "0.2.1", optional = true }
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 tauri-plugin-remote-push = "1.0.10"
 
+# Mobile-only: native haptic feedback (iOS Taptic Engine + Android vibrator).
+# navigator.vibrate is a no-op inside the iOS WKWebView, so iOS gets no haptics
+# without this plugin; the JS bridge falls back to navigator.vibrate elsewhere.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-haptics = "2"
+
 # macOS-only: Objective-C bindings for dock badge + the custom NSOpenPanel
 # wrapper that works around the rfd 0.16 / objc2-app-kit 0.3.2 panic on
 # macOS 26 Tahoe (the upstream openPanel binding is non-nullable but the

@@ -78,7 +78,15 @@
   };
 
   const handleKeydown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') handleClose();
+    if (e.key === 'Escape') {
+      handleClose();
+    } else if (e.key === 'Enter') {
+      // Submit the search and return to the list to see results — the overlay
+      // only renders suggestions, so staying open would hide the results.
+      e.preventDefault();
+      onSearch?.(localQuery);
+      handleClose();
+    }
   };
 
   // Group suggestions by type for display

@@ -807,6 +807,13 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_webdriver::init());
     }
 
+    // Native haptic feedback (iOS Taptic Engine / Android vibrator). Mobile-only:
+    // navigator.vibrate is a no-op in the iOS WKWebView.
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_haptics::init());
+    }
+
     builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_deep_link::init())

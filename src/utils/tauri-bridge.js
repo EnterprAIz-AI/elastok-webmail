@@ -16,6 +16,8 @@
  *   - Event payloads are type-checked before dispatch.
  */
 
+import { isTauriMobile } from './platform.js';
+
 let _invoke;
 let _listen;
 let _emit;
@@ -262,6 +264,13 @@ export async function onBackButton(handler) {
  * No-op on platforms without navigator.vibrate.
  */
 export function triggerHaptic(style = 'light') {
+  // iOS WKWebView has no navigator.vibrate, so route through the native haptics
+  // plugin on Tauri mobile (works on Android too, with proper iOS-style impact /
+  // notification feedback). Fall back to navigator.vibrate on web/desktop.
+  if (isTauriMobile) {
+    void nativeHaptic(style);
+    return;
+  }
   if (typeof navigator === 'undefined' || !navigator.vibrate) return;
   const patterns = {
     light: 10,
@@ -271,6 +280,21 @@ export function triggerHaptic(style = 'light') {
     error: [20, 40, 20, 40, 20],
   };
   navigator.vibrate(patterns[style] || 10);
+}
+
+async function nativeHaptic(style) {
+  try {
+    const haptics = await import('@tauri-apps/plugin-haptics');
+    if (style === 'success' || style === 'warning' || style === 'error') {
+      await haptics.notificationFeedback(style);
+    } else if (style === 'medium' || style === 'heavy') {
+      await haptics.impactFeedback(style);
+    } else {
+      await haptics.impactFeedback('light');
+    }
+  } catch {
+    // Plugin not registered in this binary (e.g. desktop) — best-effort no-op.
+  }
 }
 
 /**
