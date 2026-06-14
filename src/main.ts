@@ -2716,8 +2716,11 @@ handleHashActions = function () {
           const parsed = parseMailto(value);
           viewModel.mailboxView.composeModal.open(mailtoToPrefill(parsed));
         } else {
-          viewModel.mailboxView.composeModal.open();
-          viewModel.mailboxView.composeModal.toList([value]);
+          // Pass the recipient through open(prefill) — NOT the separate toList()
+          // call, which is a no-op on desktop where compose is a separate Tauri
+          // window (the window can't be reached after it spawns). prefill.to
+          // populates the To field in both the in-app modal and the desktop window.
+          viewModel.mailboxView.composeModal.open({ to: [value] });
         }
       }, 0);
     }
