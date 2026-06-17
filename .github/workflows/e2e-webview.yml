@@ -227,6 +227,17 @@ jobs:
           # Linux suite ran ~17x slower per test than Windows). Forcing the
           # renderer off restores software-rendered paint at native speed.
           WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+          # WebKitGTK/GTK tries to reach the AT-SPI accessibility bus
+          # (org.a11y.Bus) on every app launch. Under Xvfb that service does
+          # not exist; on ubuntu-24.04 dbus-broker holds the activation request
+          # for the full 25s DBus timeout before returning ServiceUnknown,
+          # paid once PER spec's app relaunch (x17 specs) — which pushed the
+          # job past its 45-minute wall (22.04 returns the error promptly, so
+          # it never stalled). Disabling the AT-SPI bridge skips the lookup
+          # entirely. NO_AT_BRIDGE covers GTK3 (libwebkit2gtk-4.1); GTK_A11Y
+          # is the GTK4/webkitgtk-6.0 equivalent and harmless on GTK3.
+          NO_AT_BRIDGE: '1'
+          GTK_A11Y: none
         run: xvfb-run --auto-servernum -- pnpm test
 
       - name: Run E2E tests (macOS / Windows)
