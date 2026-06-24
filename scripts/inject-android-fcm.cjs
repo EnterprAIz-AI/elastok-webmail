@@ -26,16 +26,24 @@ const googleServicesSource =
 
 const googleServicesDest = path.join(APP_DIR, 'google-services.json');
 
-if (fs.existsSync(googleServicesSource)) {
-  fs.copyFileSync(googleServicesSource, googleServicesDest);
-  console.log('✓ Copied google-services.json to', googleServicesDest);
-} else {
+// Without a google-services.json there is nothing to configure FCM with, and
+// applying the google-services plugin would FAIL the Gradle build (the plugin
+// hard-requires the config file). So when it's absent, skip the entire
+// injection and leave the generated project buildable. Local dev/screenshot
+// builds and CI release builds (which don't ship push) thus succeed with no
+// FCM wiring rather than a half-injected, unresolvable plugin.
+if (!fs.existsSync(googleServicesSource)) {
   console.warn(
     '⚠ google-services.json not found at',
     googleServicesSource,
-    '\n  FCM will not work without it. Set GOOGLE_SERVICES_JSON env var or place it in scripts/android/',
+    '\n  Skipping FCM injection (push notifications require this file).',
+    '\n  Set GOOGLE_SERVICES_JSON or place it in scripts/android/ to enable FCM.',
   );
+  process.exit(0);
 }
+
+fs.copyFileSync(googleServicesSource, googleServicesDest);
+console.log('✓ Copied google-services.json to', googleServicesDest);
 
 // ── 2. Add google-services plugin to project-level build.gradle.kts ─────────
 
@@ -44,13 +52,16 @@ if (fs.existsSync(projectGradlePath)) {
   let projectGradle = fs.readFileSync(projectGradlePath, 'utf8');
 
   if (!projectGradle.includes('google-services')) {
-    // Add to plugins block
+    // Tauri generates a buildscript{}-based root (no top-level plugins{} block),
+    // so register the plugin via the buildscript classpath alongside the
+    // existing entries. Matching `plugins {` here would silently no-op and leave
+    // the app-level `id("...google-services")` unresolvable at build time.
     projectGradle = projectGradle.replace(
-      /plugins\s*\{/,
-      `plugins {\n    id("com.google.gms.google-services") version "4.4.2" apply false`,
+      /(buildscript\s*\{[\s\S]*?dependencies\s*\{)/,
+      `$1\n        classpath("com.google.gms:google-services:4.4.2")`,
     );
     fs.writeFileSync(projectGradlePath, projectGradle);
-    console.log('✓ Added google-services plugin to project build.gradle.kts');
+    console.log('✓ Added google-services classpath to project build.gradle.kts');
   }
 }
 
