@@ -448,16 +448,33 @@
       } else {
         // Tauri: use the updater-bridge
         try {
-          const { checkForUpdates } = await import('../utils/updater-bridge.js');
+          const { checkForUpdates, downloadAndInstall } =
+            await import('../utils/updater-bridge.js');
           const result = await checkForUpdates({ force: true });
           if (result?.available) {
-            updateCheckResult = `Update available: v${result.version}`;
+            // checkForUpdates() ONLY checks — the download + install + relaunch
+            // has to be triggered explicitly here, otherwise the flow dead-ends
+            // at "Update available" and nothing installs. On success the app
+            // relaunches, so the lines after the await never run.
+            updateCheckResult = `Update available: v${result.version} — downloading…`;
+            try {
+              await downloadAndInstall(result, ({ downloaded, contentLength }) => {
+                if (contentLength) {
+                  const pct = Math.floor((downloaded / contentLength) * 100);
+                  updateCheckResult = `Downloading v${result.version}… ${pct}%`;
+                }
+              });
+              updateCheckResult = `Update v${result.version} installed — restarting…`;
+            } catch (err) {
+              // updater-bridge throws friendly messages (e.g. the "move to
+              // Applications" guidance for a bad install location).
+              updateCheckResult = err instanceof Error ? err.message : 'Update failed to install';
+            }
           } else if (installedVersion) {
             updateCheckResult = `You're on the latest version (v${installedVersion})`;
           } else {
             updateCheckResult = "You're on the latest version";
           }
-          // If an update is found, updater-bridge handles the download/install flow
         } catch {
           updateCheckResult = 'Could not check for updates';
         }

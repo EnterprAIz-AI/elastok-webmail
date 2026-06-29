@@ -2350,7 +2350,20 @@ async function bootstrap() {
         });
       });
       import('./utils/updater-bridge.js').then(({ initAutoUpdater, handleWsNewRelease }) => {
-        initAutoUpdater();
+        // Previously called with no callbacks, so the background updater
+        // installed silently AND swallowed every failure (a bad install
+        // location, a download error) with zero user feedback — the app would
+        // just never update and nobody knew why. Announce the install (still
+        // automatic) and, crucially, surface errors via a toast.
+        initAutoUpdater({
+          onUpdateAvailable: (info: { version?: string }) => {
+            toasts.show(`Installing update v${info?.version ?? ''} — the app will restart`, 'info');
+            return true;
+          },
+          onError: (err: { message?: string }) => {
+            toasts.show(err?.message || 'Update failed to install', 'error');
+          },
+        });
         // Route fe:new-release events from the releaseWatcher to the Tauri updater
         _handleNewReleaseTauri = (event: Event) => {
           handleWsNewRelease((event as CustomEvent)?.detail);
