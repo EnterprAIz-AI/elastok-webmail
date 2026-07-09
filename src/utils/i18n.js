@@ -39,7 +39,10 @@ class I18n {
     if (!language) return 'en';
 
     // Extract base language code (e.g., 'en' from 'en-US')
-    return language.split('-')[0].toLowerCase();
+    const base = language.split('-')[0].toLowerCase();
+    // Locale files are region-specific for Portuguese (only pt-BR.json exists)
+    if (base === 'pt') return 'pt-BR';
+    return base;
   }
 
   /**
