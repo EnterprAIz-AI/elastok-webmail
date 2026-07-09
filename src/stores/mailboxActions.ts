@@ -293,6 +293,8 @@ export const load = async () => {
     inboxUpdater = createInboxUpdater();
     inboxUpdater.start();
 
+    // Show this account's last-known storage immediately, then refresh live.
+    seedStorageStats(nextAccount);
     updateStorageStats(nextAccount);
 
     // Prefetch adjacent accounts' INBOX in the SW background
@@ -1404,6 +1406,32 @@ export const deleteLabel = async (keyword) => {
 /**
  * Update storage statistics
  */
+// Last-known server storage figures are cached per account so the display is
+// available immediately on load/switch and never blanks while the live
+// /v1/account fetch is in flight (or if it transiently returns no quota).
+const STORAGE_STATS_PREFIX = 'storage_stats_';
+
+export const seedStorageStats = (requestedAccount?: string | null) => {
+  const account = requestedAccount || Local.get('email') || 'default';
+  try {
+    const raw = Local.get(`${STORAGE_STATS_PREFIX}${account}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.total > 0) {
+        storageUsed.set(parsed.used || 0);
+        storageTotal.set(parsed.total);
+        return;
+      }
+    }
+  } catch {
+    // ignore malformed cache
+  }
+  // No cached figure for this account, so clear it: we never want to show the
+  // previous account's usage while the live fetch runs.
+  storageUsed.set(0);
+  storageTotal.set(0);
+};
+
 export const updateStorageStats = async (requestedAccount, { force = false } = {}) => {
   const account = requestedAccount || Local.get('email') || 'default';
   try {
@@ -1422,6 +1450,11 @@ export const updateStorageStats = async (requestedAccount, { force = false } = {
     if (total) {
       storageUsed.set(used);
       storageTotal.set(total);
+      try {
+        Local.set(`${STORAGE_STATS_PREFIX}${account}`, JSON.stringify({ used, total }));
+      } catch {
+        // cache write is best-effort
+      }
     }
   } catch (err) {
     warn('Account storage stats failed (non-blocking)', err);
@@ -1834,6 +1867,10 @@ const performAccountSwitch = async (email) => {
 
   // PHASE 3: Atomic swap — replace stores with cached data instead of blanking them
   initialSyncStarted.set(false);
+  // Swap storage figures to the new account's last-known immediately (or clear
+  // if none) so the sidebar never shows the previous account's usage; load()
+  // below refreshes it live.
+  seedStorageStats(email);
   availableMoveTargets.set([]);
   syncProgress.set({ active: false, stage: '', folder: '', current: 0, total: 0, message: '' });
   indexProgress.set({ active: false, current: 0, total: 0, message: '' });

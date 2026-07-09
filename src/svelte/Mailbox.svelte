@@ -4272,6 +4272,22 @@
     }
   });
 
+  // Number of underlying messages the current selection covers. With threading
+  // on, a selected id is a conversation that can hold several messages, so the
+  // raw id count reads low against the folder's message total (e.g. 25 vs 26).
+  // Sum the messages per selected conversation so the badge matches what the
+  // user sees. Without threading each id is one message.
+  const selectedMessageCount = $derived.by(() => {
+    const ids = ($selectedConversationIds || []) as string[];
+    if (!$threadingEnabled) return ids.length;
+    const convs = ($filteredConversations || []) as Array<{ id: string; messages?: unknown[] }>;
+    const convById = new Map(convs.map((c) => [c.id, c]));
+    return ids.reduce(
+      (sum: number, id: string) => sum + (convById.get(id)?.messages?.length || 1),
+      0,
+    );
+  });
+
   const isDraftFolder = (folder) => {
     const folderKey = normalizeFolderKey(folder);
     const draftsKey = normalizeFolderKey(draftsFolderPath);
@@ -6263,7 +6279,7 @@
                 <div
                   class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-primary text-primary-foreground"
                 >
-                  <span>{$selectedConversationIds.length}</span>
+                  <span>{selectedMessageCount}</span>
                 </div>
                 <div class="flex items-center gap-1 flex-wrap">
                   <button

@@ -181,6 +181,8 @@
   let trashFolder = $state('');
   let junkFolder = $state('');
   let availableFolders = $state<string[]>([]);
+  let deletableFolders = $state<Array<{ path: string; label: string; count: number | null }>>([]);
+  let folderDeleting = $state('');
   let aliasEmail = $state('');
   let activeEmail = $state('');
   let bodyIndexingLocal = $state(true);
@@ -577,9 +579,25 @@
         }
       }),
       foldersStore.subscribe((list: unknown[]) => {
-        availableFolders = buildAvailableFolders(
-          list as { path?: string; name?: string; fullName?: string; fullname?: string }[],
-        );
+        const folderList = (list || []) as Array<{
+          path?: string;
+          name?: string;
+          fullName?: string;
+          fullname?: string;
+          count?: number;
+          totalCount?: number;
+        }>;
+        availableFolders = buildAvailableFolders(folderList);
+        // Custom (deletable) folders: everything the store knows about that
+        // isn't a protected system/special folder. Gives mobile a way to
+        // delete folders, which is otherwise right-click-only (desktop).
+        deletableFolders = folderList
+          .filter((f) => f?.path && !mailboxStore.actions.isSystemFolder?.(f.path))
+          .map((f) => ({
+            path: f.path as string,
+            label: f.name || f.fullName || f.fullname || f.path || '',
+            count: typeof f.totalCount === 'number' ? f.totalCount : (f.count ?? null),
+          }));
       }),
       effectiveTheme.subscribe((v: string) => {
         theme = v || 'system';
@@ -886,6 +904,29 @@
       setError((err as Error)?.message || 'Failed to delete label.');
     } finally {
       labelsDeleting = '';
+    }
+  };
+
+  const deleteFolderFromSettings = async (folder: {
+    path: string;
+    label: string;
+    count: number | null;
+  }) => {
+    if (!folder?.path) return;
+    const n = folder.count ?? 0;
+    const warning =
+      n > 0
+        ? `Delete "${folder.label}" and its ${n} message${n === 1 ? '' : 's'}? This cannot be undone.`
+        : `Delete "${folder.label}"? This cannot be undone.`;
+    if (!confirm(warning)) return;
+    folderDeleting = folder.path;
+    try {
+      await mailboxStore.actions.deleteFolder?.(folder.path);
+      setSuccess('Folder deleted.');
+    } catch (err) {
+      setError((err as Error)?.message || 'Failed to delete folder.');
+    } finally {
+      folderDeleting = '';
     }
   };
 
@@ -2237,6 +2278,44 @@
             <p class="text-sm text-muted-foreground">
               Leave as "Auto-detect" to automatically find folders by standard names.
             </p>
+          </Card.Content>
+        </Card.Root>
+
+        <Card.Root>
+          <Card.Header>
+            <Card.Title>Your folders</Card.Title>
+            <Card.Description>
+              Delete custom folders. System folders (Inbox, Sent, Drafts, Trash, and the like) can't
+              be removed.
+            </Card.Description>
+          </Card.Header>
+          <Card.Content class="space-y-2">
+            {#if deletableFolders.length}
+              {#each deletableFolders as folder (folder.path)}
+                <div class="flex items-center justify-between border border-border p-2">
+                  <div class="min-w-0">
+                    <div class="truncate font-medium">{folder.label}</div>
+                    {#if folder.count != null}
+                      <div class="text-xs text-muted-foreground">
+                        {folder.count}
+                        {folder.count === 1 ? 'message' : 'messages'}
+                      </div>
+                    {/if}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onclick={() => deleteFolderFromSettings(folder)}
+                    disabled={folderDeleting === folder.path}
+                    aria-label={`Delete folder ${folder.label}`}
+                  >
+                    <X class="h-4 w-4" />
+                  </Button>
+                </div>
+              {/each}
+            {:else}
+              <p class="text-sm text-muted-foreground">No custom folders.</p>
+            {/if}
           </Card.Content>
         </Card.Root>
 
