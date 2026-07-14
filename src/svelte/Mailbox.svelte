@@ -151,6 +151,7 @@
   import FileEdit from '@lucide/svelte/icons/file-edit';
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import Archive from '@lucide/svelte/icons/archive';
+  import Printer from '@lucide/svelte/icons/printer';
   import FolderIcon from '@lucide/svelte/icons/folder';
   import FolderOpen from '@lucide/svelte/icons/folder-open';
   import FolderPlus from '@lucide/svelte/icons/folder-plus';
@@ -3168,6 +3169,64 @@
     if (formatted) return formatted;
     const fallbackValue = String(fallback || '').trim();
     return fallbackValue || '';
+  };
+  // Print the open message as a clean document (header + sanitized body) via a
+  // hidden iframe, so the browser's print dialog shows only the email — not the
+  // app chrome. The body is re-sanitized here because the print frame is NOT
+  // sandboxed like EmailIframe is.
+  const printSelectedMessage = () => {
+    const msg = $selectedMessage;
+    if (!msg || typeof document === 'undefined') return;
+    const esc = (value) =>
+      String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    const fromLine = resolveAddressValue(extractAddressList(msg, 'from'), msg.from);
+    const toLine = resolveAddressValue(
+      extractAddressList(msg, 'to').length
+        ? extractAddressList(msg, 'to')
+        : extractAddressList(msg, 'recipients'),
+      msg.to
+    );
+    const dateLine = msg.date ? formatReaderDate(msg.date) : '';
+    const cleanBody = DOMPurify.sanitize($messageBody || '', { ADD_TAGS: ['style'] });
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    doc.open();
+    doc.write(
+      `<!doctype html><html><head><meta charset="utf-8"><title>${esc(msg.subject)}</title><style>
+        body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111;margin:24px;}
+        .print-header{border-bottom:1px solid #bbb;padding-bottom:12px;margin-bottom:16px;}
+        .print-header h1{font-size:18px;margin:0 0 8px;}
+        .print-header div{font-size:12px;color:#333;margin:2px 0;}
+        img{max-width:100%;}
+      </style></head><body><div class="print-header">
+        <h1>${esc(msg.subject || '(no subject)')}</h1>
+        <div><strong>From:</strong> ${esc(fromLine)}</div>
+        ${toLine ? `<div><strong>To:</strong> ${esc(toLine)}</div>` : ''}
+        ${dateLine ? `<div><strong>Date:</strong> ${esc(dateLine)}</div>` : ''}
+      </div>${cleanBody}</body></html>`
+    );
+    doc.close();
+    const cleanup = () => frame.remove();
+    frame.contentWindow?.addEventListener('afterprint', cleanup, { once: true });
+    // Small delay so images/styles settle before the dialog snapshots the page
+    setTimeout(() => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        cleanup();
+      }
+    }, 350);
+    // Fallback cleanup in case afterprint never fires
+    setTimeout(() => {
+      if (frame.isConnected) frame.remove();
+    }, 60000);
   };
   const copyToClipboard = async (value) => {
     if (!value) return false;
@@ -7929,6 +7988,18 @@
                                 <span>Forward</span>
                               </button>
                             {/if}
+                            <button
+                              type="button"
+                              class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer active:bg-accent"
+                              onclick={() => {
+                                actionMenuOpen = false;
+                                printSelectedMessage();
+                              }}
+                              data-testid="action-menu-print"
+                            >
+                              <Printer class="h-4 w-4" />
+                              <span>Print</span>
+                            </button>
                             {#if canEditDraft}
                               <button
                                 type="button"
