@@ -31,6 +31,7 @@ import {
   buildOriginalViewerPage,
   pickOriginalContent,
 } from './mailbox-actions-helpers';
+import { contentToBytes } from './mail-service-helpers';
 import { startInitialSync, queueBodiesForFolder } from '../utils/sync-controller';
 import { resetSyncWorkerReady } from '../utils/sync-worker-client.js';
 import { isDemoMode } from '../utils/demo-mode';
@@ -834,6 +835,108 @@ export const replyTo = async (msg, options = {}) => {
 
 export const replyAll = (msg) => replyTo(msg, { replyAll: true });
 
+// Largest single attachment we will re-attach when forwarding. Above this we
+// skip it (and warn) to avoid building a multi-hundred-MB base64 string that
+// would OOM the renderer — mirrors the download path's large-attachment guard.
+const MAX_FORWARD_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+// Normalize an attachment's `content` field (base64 string, Buffer-ish object,
+// or raw bytes) into the plain base64 string the compose send payload expects.
+const attachmentContentToBase64 = (content) => {
+  if (typeof content === 'string') {
+    const cleaned = content.replace(/\s+/g, '');
+    if (/^[A-Za-z0-9/+]+={0,2}$/.test(cleaned)) return cleaned;
+  }
+  const bytes = contentToBytes(content);
+  if (!bytes) return '';
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  try {
+    return btoa(binary);
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Collect the original message's real (non-inline) attachments with their
+ * content, ready to be re-attached to a forwarded message. Tries the local
+ * body cache first, then the message-detail API (the same call the download
+ * path uses). Inline images (referenced by cid in the body) are skipped —
+ * they already travel inside the quoted HTML. Oversized attachments are
+ * skipped and reported in the returned `skipped` list.
+ */
+export const getForwardableAttachments = async (msg) => {
+  const skipped = [];
+  const messageId = getMessageApiId(msg);
+  if (!messageId) return { attachments: [], skipped };
+
+  const account = Local.get('email') || 'default';
+  const folder = msg?.folder_path || msg?.folder || '';
+
+  // 1) Try the cached message body (populated when the reader opened it).
+  let rawAttachments = [];
+  try {
+    const cached = await db.messageBodies.get([account, messageId]);
+    if (cached?.attachments?.length) rawAttachments = cached.attachments;
+  } catch {
+    // ignore — fall through to the API
+  }
+
+  // 2) Fall back to the message-detail API when the cache is empty or the
+  //    cached entries carry no inline content (only metadata/urls).
+  const cachedHasContent = rawAttachments.some((a) => a?.content);
+  if (!rawAttachments.length || !cachedHasContent) {
+    try {
+      const detailRes = await Remote.request(
+        'Message',
+        {},
+        {
+          method: 'GET',
+          pathOverride: `/v1/messages/${encodeURIComponent(messageId)}?folder=${encodeURIComponent(folder)}&raw=false`,
+        },
+      );
+      const result = (detailRes?.Result || detailRes) || {};
+      const serverAttachments =
+        result?.nodemailer?.attachments || result?.attachments || [];
+      if (serverAttachments.length) rawAttachments = serverAttachments;
+    } catch (err) {
+      warn('[getForwardableAttachments] Failed to fetch attachments:', err);
+    }
+  }
+
+  const attachments = [];
+  for (const a of rawAttachments) {
+    const contentId = a?.cid || a?.contentId;
+    const disposition = (a?.disposition || a?.contentDisposition || '').toString().toLowerCase();
+    const isInline = disposition === 'inline' || !!contentId;
+    if (isInline) continue; // travels inside the quoted HTML
+
+    const content = attachmentContentToBase64(a?.content);
+    if (!content) continue; // url-only / unreadable — can't re-attach
+
+    const filename = a?.filename || a?.name || 'attachment';
+    const approxBytes = a?.size || Math.floor((content.length * 3) / 4);
+    if (approxBytes > MAX_FORWARD_ATTACHMENT_BYTES) {
+      skipped.push(filename);
+      continue;
+    }
+
+    attachments.push({
+      name: filename,
+      filename,
+      size: a?.size || approxBytes,
+      contentType: a?.contentType || a?.mimeType || a?.type || 'application/octet-stream',
+      content,
+    });
+  }
+
+  return { attachments, skipped };
+};
+
 export const forwardMessage = async (msg) => {
   if (!composeModalRef) return;
 
@@ -863,10 +966,27 @@ export const forwardMessage = async (msg) => {
     forwardFromAddress = get(currentAccount) || Local.get('email') || '';
   }
 
+  // Carry the original message's real attachments into the forward so they
+  // actually reach the recipient. Failures here must not block the compose.
+  let forwardAttachments = [];
+  try {
+    const collected = await getForwardableAttachments(msg);
+    forwardAttachments = collected.attachments;
+    if (collected.skipped.length) {
+      toastsRef?.show?.(
+        `${collected.skipped.length} anexo(s) grande(s) não incluído(s): ${collected.skipped.join(', ')}`,
+        'warning',
+      );
+    }
+  } catch (err) {
+    warn('[forwardMessage] Failed to load attachments:', err);
+  }
+
   composeModalRef.forward?.({
     subject: addForwardPrefix(msg?.subject),
     from: forwardFromAddress,
     html: quotedBody,
+    attachments: forwardAttachments,
   });
 };
 

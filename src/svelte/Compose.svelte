@@ -2726,6 +2726,12 @@
         console.error('[Compose] Failed to load draft:', err);
       }
     }
+    // Forward passes the original message's attachments through here so they
+    // land in the send payload. reset() already emptied the tray; a draft
+    // reopen restored its own above, so only apply this for non-draft opens.
+    if (!resolvedPrefill.draftId && Array.isArray(resolvedPrefill.attachments)) {
+      attachments = resolvedPrefill.attachments as unknown[];
+    }
     if (resolvedPrefill.to) {
       const normalizedTo = normalizePrefillList(resolvedPrefill.to);
       toList = normalizedTo.length
