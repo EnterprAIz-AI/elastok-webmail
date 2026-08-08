@@ -1353,6 +1353,11 @@ if (isTauriDesktop) {
       composeApi.forward({
         subject: prefill?.subject,
         body: prefill?.body || get(messageBody),
+        // The original message's files, already collected and base64-encoded by
+        // forwardMessage(). This bridge rebuilds the prefill field by field, so
+        // anything not listed here is silently dropped before it reaches the
+        // composer — which is how forwards kept going out with no attachments.
+        attachments: prefill?.attachments,
       });
     },
     reply(prefill) {
