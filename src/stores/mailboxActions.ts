@@ -30,6 +30,7 @@ import {
   normalizeHeaders,
   buildOriginalViewerPage,
   pickOriginalContent,
+  isInlineAttachmentPart,
 } from './mailbox-actions-helpers';
 import { contentToBytes } from './mail-service-helpers';
 import { startInitialSync, queueBodiesForFolder } from '../utils/sync-controller';
@@ -899,9 +900,8 @@ export const getForwardableAttachments = async (msg) => {
           pathOverride: `/v1/messages/${encodeURIComponent(messageId)}?folder=${encodeURIComponent(folder)}&raw=false`,
         },
       );
-      const result = (detailRes?.Result || detailRes) || {};
-      const serverAttachments =
-        result?.nodemailer?.attachments || result?.attachments || [];
+      const result = detailRes?.Result || detailRes || {};
+      const serverAttachments = result?.nodemailer?.attachments || result?.attachments || [];
       if (serverAttachments.length) rawAttachments = serverAttachments;
     } catch (err) {
       warn('[getForwardableAttachments] Failed to fetch attachments:', err);
@@ -910,10 +910,7 @@ export const getForwardableAttachments = async (msg) => {
 
   const attachments = [];
   for (const a of rawAttachments) {
-    const contentId = a?.cid || a?.contentId;
-    const disposition = (a?.disposition || a?.contentDisposition || '').toString().toLowerCase();
-    const isInline = disposition === 'inline' || !!contentId;
-    if (isInline) continue; // travels inside the quoted HTML
+    if (isInlineAttachmentPart(a)) continue; // travels inside the quoted HTML
 
     const content = attachmentContentToBase64(a?.content);
     if (!content) continue; // url-only / unreadable — can't re-attach

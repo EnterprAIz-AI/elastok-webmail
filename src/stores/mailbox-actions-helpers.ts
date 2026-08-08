@@ -251,3 +251,33 @@ export const pickOriginalContent = (
   if (!content) return '';
   return content.raw || content.body || content.textContent || '';
 };
+
+/**
+ * Decide whether a parsed message part is an inline body asset (an image the
+ * HTML references via cid:) rather than a real attachment the user sees and
+ * expects to travel along when forwarding.
+ *
+ * The subtlety: a Content-ID alone means nothing. Gmail stamps a cid on every
+ * attachment it sends, real PDFs included, so keying off cid drops exactly the
+ * files a forward is supposed to carry. Content-Disposition is authoritative
+ * when the part has one; only when it's absent do we fall back to mailparser's
+ * `related` flag (set for parts the HTML actually references) or a bare cid.
+ */
+export const isInlineAttachmentPart = (
+  att:
+    | {
+        cid?: string;
+        contentId?: string;
+        disposition?: string;
+        contentDisposition?: string;
+        related?: boolean;
+      }
+    | null
+    | undefined,
+): boolean => {
+  if (!att) return false;
+  const disposition = (att.contentDisposition || att.disposition || '').toString().toLowerCase();
+  if (disposition === 'inline') return true;
+  if (disposition) return false; // "attachment" (or anything explicit) — a real file
+  return att.related === true || !!(att.cid || att.contentId);
+};
