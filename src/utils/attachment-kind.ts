@@ -125,6 +125,41 @@ export function filterDownloadableAttachments<T extends AttachmentLike>(
   });
 }
 
+interface RowLike {
+  attachments?: AttachmentLike[];
+  has_attachment?: boolean;
+  has_attachments?: boolean;
+  attachment_count?: number;
+  latestHasAttachments?: boolean;
+  messages?: RowLike[];
+}
+
+/**
+ * Whether a mailbox row (a message or a whole conversation) should advertise
+ * attachments.
+ *
+ * `has_attachment`, singular, is the field the sync worker actually writes on
+ * every message record. The plural spelling and the two count fields below are
+ * other shapes the API and older caches have used; keeping them costs nothing,
+ * but leaving the singular one out — as this check did for a long time — makes
+ * the paperclip disappear from every row in the inbox.
+ */
+export function rowHasAttachments(item: RowLike | null | undefined): boolean {
+  if (!item) return false;
+  // When the real list is loaded, trust it: it knows to ignore signature logos.
+  if (Array.isArray(item.attachments) && item.attachments.length) {
+    return filterDownloadableAttachments(item.attachments).length > 0;
+  }
+  if (item.has_attachment) return true;
+  if (item.has_attachments) return true;
+  if ((item.attachment_count || 0) > 0) return true;
+  if (item.latestHasAttachments) return true;
+  if (Array.isArray(item.messages)) {
+    return item.messages.some((message) => rowHasAttachments(message));
+  }
+  return false;
+}
+
 /** Summary line for the preview header: '3 files · 445 KB'. */
 export function describeAttachments(atts: AttachmentLike[] | null | undefined): string {
   const list = Array.isArray(atts) ? atts : [];

@@ -208,6 +208,7 @@
     filterDownloadableAttachments,
     formatAttachmentSize,
     isPreviewableImage,
+    rowHasAttachments as hasAttachments,
   } from '../utils/attachment-kind';
   import { openAttachmentViewer, groupsToEntries } from '../stores/attachmentPreview';
   import {
@@ -1141,22 +1142,6 @@
       showListSkeleton = false;
     }
   });
-
-  const hasAttachments = (item) => {
-    if (!item) return false;
-    // When the full attachments array is available, use filterDownloadableAttachments
-    // to exclude inline CID images (e.g. signature logos)
-    if (Array.isArray(item.attachments) && item.attachments.length) {
-      return filterDownloadableAttachments(item.attachments).length > 0;
-    }
-    if (item.has_attachments) return true;
-    if (item.attachment_count > 0) return true;
-    if (item.latestHasAttachments) return true;
-    if (Array.isArray(item.messages)) {
-      return item.messages.some((m) => hasAttachments(m));
-    }
-    return false;
-  };
 
   /**
    * Sanitize outbox HTML preview to prevent XSS.

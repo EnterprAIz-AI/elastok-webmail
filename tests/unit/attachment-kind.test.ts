@@ -9,6 +9,7 @@ import {
   formatAttachmentSize,
   isPdf,
   isPreviewableImage,
+  rowHasAttachments,
   THUMBNAIL_MAX_BYTES,
 } from '../../src/utils/attachment-kind';
 
@@ -110,6 +111,36 @@ describe('filterDownloadableAttachments', () => {
   it('tolerates a missing list', () => {
     expect(filterDownloadableAttachments(null)).toEqual([]);
     expect(filterDownloadableAttachments(undefined)).toEqual([]);
+  });
+});
+
+describe('rowHasAttachments', () => {
+  it('recognizes has_attachment, the field the sync worker actually writes', () => {
+    // The regression this pins: the inbox check only knew the plural spelling,
+    // so the paperclip never appeared on any row.
+    expect(rowHasAttachments({ has_attachment: true })).toBe(true);
+  });
+
+  it('still accepts the other shapes the API and older caches used', () => {
+    expect(rowHasAttachments({ has_attachments: true })).toBe(true);
+    expect(rowHasAttachments({ attachment_count: 2 })).toBe(true);
+    expect(rowHasAttachments({ latestHasAttachments: true })).toBe(true);
+  });
+
+  it('prefers a loaded list, and a list of only inline logos does not count', () => {
+    expect(rowHasAttachments({ attachments: [gmailPdf] })).toBe(true);
+    expect(rowHasAttachments({ attachments: [signatureLogo], has_attachment: true })).toBe(false);
+  });
+
+  it('walks a conversation down to its messages', () => {
+    expect(rowHasAttachments({ messages: [{}, { has_attachment: true }] })).toBe(true);
+    expect(rowHasAttachments({ messages: [{}, {}] })).toBe(false);
+  });
+
+  it('says no for an empty or missing row', () => {
+    expect(rowHasAttachments(null)).toBe(false);
+    expect(rowHasAttachments({})).toBe(false);
+    expect(rowHasAttachments({ attachment_count: 0 })).toBe(false);
   });
 });
 
