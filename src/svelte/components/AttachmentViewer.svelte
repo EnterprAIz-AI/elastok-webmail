@@ -41,6 +41,22 @@
     (/iP(hone|ad|od)/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 
+  /**
+   * Never let the sender pick the MIME type we hand the browser.
+   *
+   * A blob: URL inherits this app's origin, so an attachment named "nota.pdf"
+   * whose Content-Type says text/html would render as HTML inside the webmail
+   * origin the moment it goes in an iframe — stored XSS, delivered by email.
+   * The kind is decided from our own classification, and anything we don't
+   * intend to display is neutered to octet-stream.
+   */
+  const retype = (blob: Blob, att: typeof attachment): Blob => {
+    const kindNow = attachmentKind(att);
+    if (kindNow === 'pdf') return new Blob([blob], { type: 'application/pdf' });
+    if (kindNow === 'image' && blob.type.startsWith('image/')) return blob;
+    return new Blob([blob], { type: 'application/octet-stream' });
+  };
+
   let objectUrl: string | null = $state(null);
   let loading = $state(false);
   let failed = $state(false);
@@ -69,7 +85,7 @@
           failed = true;
           return;
         }
-        created = URL.createObjectURL(blob);
+        created = URL.createObjectURL(retype(blob, currentAttachment));
         objectUrl = created;
       })
       .catch(() => {
