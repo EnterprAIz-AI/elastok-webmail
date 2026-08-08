@@ -36,6 +36,7 @@ import {
   composeAbortSignals,
   sanitizeAttachments,
 } from './mail-service-helpers';
+import { isInlineAttachmentPart } from './mailbox-actions-helpers';
 
 export interface MessageDetailCallbacks {
   onLoading?: (loading: boolean) => void;
@@ -141,6 +142,12 @@ const TAURI_WRITE_CHUNK_SIZE = 256 * 1024;
 // footprint — the documented OOM cause behind the macOS attachment-open
 // abort() crashes (kernel triage: mach_vm_allocate_kernel failed).
 const LARGE_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+
+// Attachments at or below this size are embedded as a data URL when the message
+// body is parsed, so they stay readable offline and the inbox can thumbnail them
+// without re-downloading the whole message. Matches the per-item ceiling of the
+// attachment blob cache; above it the file is fetched on demand.
+const EMBEDDABLE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
 // Write a Uint8Array straight to a user-chosen save location on Tauri,
 // or trigger a Blob-based download on the web. Bypasses bufferToDataUrl
@@ -1182,23 +1189,29 @@ export const mailService = {
         const a = att as Record<string, unknown>;
         const contentId = a.cid || a.contentId;
         const disposition = (a.disposition || a.contentDisposition || '').toString().toLowerCase();
-        const isInline = disposition === 'inline' || !!contentId;
+        const isInline = isInlineAttachmentPart(a);
         const hasUrl = !!a.url;
+        const size = (a.size ||
+          (a.content as ArrayBuffer)?.byteLength ||
+          (a.content as Uint8Array)?.length ||
+          0) as number;
 
         let href: string | undefined;
         if (hasUrl) {
           href = a.url as string;
-        } else if (isInline && a.content) {
+        } else if (a.content && (isInline || size <= EMBEDDABLE_ATTACHMENT_BYTES)) {
+          // Inline parts have to be embedded — the HTML references them by cid.
+          // Ordinary files are embedded too when they're small, which is what
+          // lets offline download and the inbox thumbnails work without going
+          // back to the API for the whole message. Bigger ones are left to
+          // download on demand instead of sitting in IndexedDB as base64.
           href = bufferToDataUrl(a);
         }
 
         return {
           name: (a.name || a.filename) as string,
           filename: a.filename as string,
-          size: (a.size ||
-            (a.content as ArrayBuffer)?.byteLength ||
-            (a.content as Uint8Array)?.length ||
-            0) as number,
+          size,
           contentId: contentId as string,
           disposition,
           href,
@@ -1461,23 +1474,29 @@ export const mailService = {
         const a = att as Record<string, unknown>;
         const contentId = a.cid || a.contentId;
         const disposition = (a.disposition || a.contentDisposition || '').toString().toLowerCase();
-        const isInline = disposition === 'inline' || !!contentId;
+        const isInline = isInlineAttachmentPart(a);
         const hasUrl = !!a.url;
+        const size = (a.size ||
+          (a.content as ArrayBuffer)?.byteLength ||
+          (a.content as Uint8Array)?.length ||
+          0) as number;
 
         let href: string | undefined;
         if (hasUrl) {
           href = a.url as string;
-        } else if (isInline && a.content) {
+        } else if (a.content && (isInline || size <= EMBEDDABLE_ATTACHMENT_BYTES)) {
+          // Inline parts have to be embedded — the HTML references them by cid.
+          // Ordinary files are embedded too when they're small, which is what
+          // lets offline download and the inbox thumbnails work without going
+          // back to the API for the whole message. Bigger ones are left to
+          // download on demand instead of sitting in IndexedDB as base64.
           href = bufferToDataUrl(a);
         }
 
         return {
           name: (a.name || a.filename) as string,
           filename: a.filename as string,
-          size: (a.size ||
-            (a.content as ArrayBuffer)?.byteLength ||
-            (a.content as Uint8Array)?.length ||
-            0) as number,
+          size,
           contentId: contentId as string,
           disposition,
           href,
