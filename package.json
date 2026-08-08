@@ -100,6 +100,7 @@
     "marked": "^12.0.2",
     "msgpackr": "^1.11.10",
     "openpgp": "^6.3.0",
+    "pdfjs-dist": "6.2.108",
     "postal-mime": "^2.7.4",
     "preact": "^10.29.1",
     "rrule": "2.8.1",

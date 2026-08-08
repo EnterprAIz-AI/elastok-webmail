@@ -2,8 +2,8 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { Badge } from '$lib/components/ui/badge';
   import Star from '@lucide/svelte/icons/star';
-  import Paperclip from '@lucide/svelte/icons/paperclip';
   import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
+  import AttachmentPopover from './components/AttachmentPopover.svelte';
   import { formatCompactDate } from '../utils/date';
   import { extractDisplayName } from '../utils/address.ts';
   import { truncatePreview } from '../utils/preview';
@@ -189,7 +189,7 @@
         <LockKeyhole class="h-3.5 w-3.5 shrink-0 opacity-70" aria-label="PGP encrypted" />
       {/if}
       {#if hasAttachment}
-        <Paperclip class="h-3.5 w-3.5 shrink-0 opacity-70" />
+        <AttachmentPopover {item} />
       {/if}
       {#if labels && labels.length > 0}
         <span class="flex items-center gap-1">

@@ -29,7 +29,12 @@ module.exports = {
   // Enables the app to load from cache when the network is unavailable.
   navigateFallback: '/index.html',
   navigateFallbackDenylist: [/^\/api\//, /^\/v1\//, /\/clear-manifest\.json$/],
-  globIgnores: ['clear-manifest.json'],
+  // pdf.js is loaded on demand for PDF attachment thumbnails. Precaching it
+  // would push ~433 KB onto every install (and re-download it every release,
+  // since the cache tracks pkg.version) for a feature most sessions never
+  // touch. Left to the network + HTTP cache; without it a PDF simply falls
+  // back to its type card.
+  globIgnores: ['clear-manifest.json', 'assets/pdf-*.js', 'assets/pdf.worker*'],
   cleanupOutdatedCaches: true,
   // Aggressive updates - safe because JS/CSS have content hashes
   skipWaiting: true,

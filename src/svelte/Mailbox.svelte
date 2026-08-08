@@ -202,6 +202,14 @@
   import MobileSearchOverlay from './components/MobileSearchOverlay.svelte';
   import MessageTab from './components/MessageTab.svelte';
   import CalendarInviteCard from './components/CalendarInviteCard.svelte';
+  import AttachmentViewer from './components/AttachmentViewer.svelte';
+  import AttachmentPopover from './components/AttachmentPopover.svelte';
+  import {
+    filterDownloadableAttachments,
+    formatAttachmentSize,
+    isPreviewableImage,
+  } from '../utils/attachment-kind';
+  import { openAttachmentViewer, groupsToEntries } from '../stores/attachmentPreview';
   import {
     isCalendarAttachment,
     fetchAttachmentText,
@@ -1150,36 +1158,6 @@
     return false;
   };
 
-  const PREVIEWABLE_IMAGE_TYPES = new Set([
-    'image/gif',
-    'image/png',
-    'image/jpeg',
-    'image/jpg',
-    'image/webp',
-    'image/bmp',
-    'image/apng',
-    'image/avif',
-  ]);
-
-  const PREVIEWABLE_EXTENSIONS = new Set([
-    'gif',
-    'png',
-    'jpeg',
-    'jpg',
-    'webp',
-    'bmp',
-    'apng',
-    'avif',
-  ]);
-
-  const isPreviewableImage = (att) => {
-    const type = (att?.contentType || att?.mimeType || att?.type || '').toLowerCase();
-    if (PREVIEWABLE_IMAGE_TYPES.has(type)) return true;
-    const name = (att?.name || att?.filename || '').toLowerCase();
-    const ext = name.includes('.') ? name.split('.').pop() : '';
-    return ext ? PREVIEWABLE_EXTENSIONS.has(ext) : false;
-  };
-
   /**
    * Sanitize outbox HTML preview to prevent XSS.
    * Outbox items may contain user-composed HTML that has not been
@@ -1220,29 +1198,18 @@
     });
   };
 
-  const formatAttachmentSize = (bytes) => {
-    if (!bytes) return '';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  // Open the shared full-screen viewer on the clicked file, with the rest of
+  // the message (or thread) available behind the arrow keys.
+  const openThreadAttachment = (groups, message, att) => {
+    const entries = groupsToEntries(groups);
+    const index = entries.findIndex((e) => e.attachment === att && e.message === message);
+    openAttachmentViewer(entries, index < 0 ? 0 : index);
   };
 
-  // Filter attachments for the download/preview section.
-  // Only hide attachments that are purely inline decorations (e.g. signature logos):
-  // they must have a CID, be an image, AND have inline disposition explicitly set.
-  // All other attachments (including images without disposition or with disposition=attachment) are shown.
-  const filterDownloadableAttachments = (atts) => {
-    if (!Array.isArray(atts)) return [];
-    return atts.filter((att) => {
-      if (!att.contentId) return true;
-      const type = (att.contentType || att.mimeType || att.type || '').toLowerCase();
-      if (!type.startsWith('image/')) return true;
-      // Only hide if disposition is explicitly 'inline' — these are CID images
-      // embedded in the body (e.g. signature logos). If disposition is missing or
-      // is 'attachment', always show the file.
-      const disp = (att.disposition || '').toLowerCase();
-      return disp !== 'inline';
-    });
+  const openMessageAttachment = (atts, message, att) => {
+    const entries = (atts || []).map((attachment) => ({ attachment, message }));
+    const index = entries.findIndex((e) => e.attachment === att);
+    openAttachmentViewer(entries, index < 0 ? 0 : index);
   };
 
   let isDarkMode = $state(false);
@@ -6763,20 +6730,7 @@
                                     />
                                   {/if}
                                   {#if hasAttachments(conv)}
-                                    <svg
-                                      viewBox="0 0 24 24"
-                                      class="h-3.5 w-3.5 text-muted-foreground shrink-0"
-                                      aria-hidden="true"
-                                    >
-                                      <path
-                                        d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 1 1 4.24 4.24l-9.19 9.19a1 1 0 1 1-1.41-1.41l8.49-8.49"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                      ></path>
-                                    </svg>
+                                    <AttachmentPopover item={conv} />
                                   {/if}
                                 </div>
                               </div>
@@ -6847,16 +6801,7 @@
                                         </svg>
                                       {/if}
                                       {#if hasAttachments(conv)}
-                                        <svg viewBox="0 0 24 24" class="h-3 w-3" aria-hidden="true">
-                                          <path
-                                            d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 1 1 4.24 4.24l-9.19 9.19a1 1 0 1 1-1.41-1.41l8.49-8.49"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                          ></path>
-                                        </svg>
+                                        <AttachmentPopover item={conv} />
                                       {/if}
                                       {#if conv.starred}
                                         <Star class="h-3 w-3 fill-yellow-400 text-yellow-400" />
@@ -6984,16 +6929,7 @@
                                         </svg>
                                       {/if}
                                       {#if hasAttachments(conv)}
-                                        <svg viewBox="0 0 24 24" class="h-3 w-3" aria-hidden="true">
-                                          <path
-                                            d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 1 1 4.24 4.24l-9.19 9.19a1 1 0 1 1-1.41-1.41l8.49-8.49"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                          ></path>
-                                        </svg>
+                                        <AttachmentPopover item={conv} />
                                       {/if}
                                       <span class="text-[11px] whitespace-nowrap">
                                         {#if conv.latestDate}
@@ -7118,16 +7054,7 @@
                                   class="flex items-center gap-1.5 shrink-0 text-muted-foreground"
                                 >
                                   {#if hasAttachments(msg)}
-                                    <svg viewBox="0 0 24 24" class="h-3 w-3" aria-hidden="true">
-                                      <path
-                                        d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 1 1 4.24 4.24l-9.19 9.19a1 1 0 1 1-1.41-1.41l8.49-8.49"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                      ></path>
-                                    </svg>
+                                    <AttachmentPopover item={msg} />
                                   {/if}
                                   {#if msg.starred}
                                     <Star class="h-3 w-3 fill-yellow-400 text-yellow-400" />
@@ -7215,16 +7142,7 @@
                                   class="flex items-center gap-1.5 shrink-0 text-muted-foreground"
                                 >
                                   {#if hasAttachments(msg)}
-                                    <svg viewBox="0 0 24 24" class="h-3 w-3" aria-hidden="true">
-                                      <path
-                                        d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 1 1 4.24 4.24l-9.19 9.19a1 1 0 1 1-1.41-1.41l8.49-8.49"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                      ></path>
-                                    </svg>
+                                    <AttachmentPopover item={msg} />
                                   {/if}
                                   <span class="text-[11px] whitespace-nowrap">
                                     {formatCompactDate(msg.date)}
@@ -8733,8 +8651,9 @@
                                 <button
                                   type="button"
                                   class="cursor-pointer rounded border border-border overflow-hidden hover:opacity-90 transition-opacity"
-                                  onclick={() => mailService.downloadAttachment(att, group.message)}
-                                  title="Download {att.name || att.filename}"
+                                  onclick={() =>
+                                    openThreadAttachment(allThreadAttachments, group.message, att)}
+                                  title="Preview {att.name || att.filename}"
                                 >
                                   <img
                                     src={att.href}
@@ -8761,19 +8680,29 @@
                                 </div>
                               </div>
                             {:else}
-                              <button
-                                type="button"
-                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-secondary hover:bg-secondary/80 cursor-pointer transition-colors"
-                                onclick={() => mailService.downloadAttachment(att, group.message)}
-                                title="Download {att.name || att.filename}"
-                                data-testid="attachment-row"
-                              >
-                                <span>{att.name || att.filename}</span>
-                                {#if att.size}<span class="text-xs text-muted-foreground"
-                                    >{formatAttachmentSize(att.size)}</span
-                                  >{/if}
-                                <Download class="h-3.5 w-3.5 ml-1" />
-                              </button>
+                              <div class="inline-flex items-center bg-secondary">
+                                <button
+                                  type="button"
+                                  class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm hover:bg-secondary/80 cursor-pointer transition-colors"
+                                  onclick={() =>
+                                    openThreadAttachment(allThreadAttachments, group.message, att)}
+                                  title="Preview {att.name || att.filename}"
+                                  data-testid="attachment-row"
+                                >
+                                  <span>{att.name || att.filename}</span>
+                                  {#if att.size}<span class="text-xs text-muted-foreground"
+                                      >{formatAttachmentSize(att.size)}</span
+                                    >{/if}
+                                </button>
+                                <button
+                                  type="button"
+                                  class="px-2 py-1.5 text-muted-foreground hover:bg-secondary/80 hover:text-foreground cursor-pointer transition-colors"
+                                  onclick={() => mailService.downloadAttachment(att, group.message)}
+                                  title="Download {att.name || att.filename}"
+                                >
+                                  <Download class="h-3.5 w-3.5" />
+                                </button>
+                              </div>
                             {/if}
                           {/each}
                         </div>
@@ -8907,8 +8836,12 @@
                                 type="button"
                                 class="cursor-pointer rounded border border-border overflow-hidden hover:opacity-90 transition-opacity"
                                 onclick={() =>
-                                  mailService.downloadAttachment(att, $selectedMessage)}
-                                title="Download {att.name || att.filename}"
+                                  openMessageAttachment(
+                                    filterDownloadableAttachments($attachments),
+                                    $selectedMessage,
+                                    att,
+                                  )}
+                                title="Preview {att.name || att.filename}"
                               >
                                 <img
                                   src={att.href}
@@ -8935,18 +8868,33 @@
                               </div>
                             </div>
                           {:else}
-                            <button
-                              type="button"
-                              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-secondary hover:bg-secondary/80 cursor-pointer transition-colors"
-                              onclick={() => mailService.downloadAttachment(att, $selectedMessage)}
-                              title="Download {att.name || att.filename}"
-                            >
-                              <span>{att.name || att.filename}</span>
-                              {#if att.size}<span class="text-xs text-muted-foreground"
-                                  >{formatAttachmentSize(att.size)}</span
-                                >{/if}
-                              <Download class="h-3.5 w-3.5 ml-1" />
-                            </button>
+                            <div class="inline-flex items-center bg-secondary">
+                              <button
+                                type="button"
+                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm hover:bg-secondary/80 cursor-pointer transition-colors"
+                                onclick={() =>
+                                  openMessageAttachment(
+                                    filterDownloadableAttachments($attachments),
+                                    $selectedMessage,
+                                    att,
+                                  )}
+                                title="Preview {att.name || att.filename}"
+                                data-testid="attachment-row"
+                              >
+                                <span>{att.name || att.filename}</span>
+                                {#if att.size}<span class="text-xs text-muted-foreground"
+                                    >{formatAttachmentSize(att.size)}</span
+                                  >{/if}
+                              </button>
+                              <button
+                                type="button"
+                                class="px-2 py-1.5 text-muted-foreground hover:bg-secondary/80 hover:text-foreground cursor-pointer transition-colors"
+                                onclick={() => mailService.downloadAttachment(att, $selectedMessage)}
+                                title="Download {att.name || att.filename}"
+                              >
+                                <Download class="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           {/if}
                         {/each}
                       </div>
@@ -9102,6 +9050,10 @@
 {#if $selectedFolder === 'INBOX'}
   <MailtoPrompt account={$currentAccount || ''} />
 {/if}
+
+<!-- Full-screen attachment preview, shared by the inbox popover and the
+     open-message attachment strip. Mounted once, driven by its own store. -->
+<AttachmentViewer />
 
 <style>
   /*
